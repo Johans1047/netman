@@ -100,6 +100,21 @@ Hot Reload Host Status
 
 Possible states: `Idle`, `Debouncing`, `Building`, `ShadowCopying`, `Draining`, `TransferringState`, `TerminatingOld`, `LaunchingNew`, `Failed`.
 
+## Watch Mode
+
+Use `--watch` (or `-w`) to automatically rebuild when source files change:
+
+```bash
+netman start --watch -p MyService.csproj
+netman start -w MyService.csproj
+```
+
+This monitors the `src/` directory for `.cs` file changes. On change:
+1. Rebuilds the solution with MSBuild
+2. Restarts the host process automatically
+
+Press Ctrl+C to stop watching.
+
 ## Behavior
 
 ### Watch directory

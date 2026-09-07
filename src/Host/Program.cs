@@ -1,4 +1,6 @@
 using System;
+using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using HotReloadTool.Common;
 using HotReloadTool.Contracts;
@@ -27,7 +29,7 @@ namespace HotReloadTool.Host
             switch (parsed.Command)
             {
                 case HotReloadCommand.Start:
-                    return ExecuteStart(parsed);
+                    return parsed.Watch ? ExecuteWatch(parsed) : ExecuteStart(parsed);
                 case HotReloadCommand.Stop:
                     return ExecuteStop(parsed);
                 case HotReloadCommand.Status:
@@ -161,6 +163,153 @@ namespace HotReloadTool.Host
 
         static ManualResetEvent _shutdownEvent;
 
+        /// <summary>
+        /// Runs the Host in watch mode: monitors the src/ directory for .cs changes,
+        /// rebuilds on change, and restarts the host process.
+        /// </summary>
+        static int ExecuteWatch(CommandLineArgs args)
+        {
+            // BaseDirectory is src\Host\bin\Debug\ -> go up to solution root
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            string srcDir = Path.Combine(baseDir, "..", "..", "..", "src");
+            srcDir = Path.GetFullPath(srcDir);
+            string slnPath = Path.Combine(baseDir, "..", "..", "..", "HotReloadTool.sln");
+            slnPath = Path.GetFullPath(slnPath);
+            string exePath = Process.GetCurrentProcess().MainModule.FileName;
+
+            Console.WriteLine("[netman watch] Watching: " + srcDir);
+            Console.WriteLine("[netman watch] Press Ctrl+C to stop.");
+            Console.WriteLine("");
+
+            BuildSolution(slnPath);
+
+            var startArgs = new System.Collections.Generic.List<string> { "start" };
+            if (!string.IsNullOrEmpty(args.ProjectPath))
+            {
+                startArgs.Add("-p");
+                startArgs.Add(args.ProjectPath);
+            }
+            if (args.DebounceMilliseconds.HasValue)
+            {
+                startArgs.Add("--debounce");
+                startArgs.Add(args.DebounceMilliseconds.Value.ToString());
+            }
+            if (args.DrainTimeoutMilliseconds.HasValue)
+            {
+                startArgs.Add("--drain-timeout");
+                startArgs.Add(args.DrainTimeoutMilliseconds.Value.ToString());
+            }
+            if (!string.IsNullOrEmpty(args.PipeName))
+            {
+                startArgs.Add("--pipe-name");
+                startArgs.Add(args.PipeName);
+            }
+
+            _watchHostProcess = StartHost(exePath, startArgs.ToArray());
+            _watchDebounceTimer = null;
+            _watchSlnPath = slnPath;
+            _watchExePath = exePath;
+            _watchStartArgs = startArgs.ToArray();
+
+            var watcher = new FileSystemWatcher(srcDir, "*.cs")
+            {
+                IncludeSubdirectories = true,
+                EnableRaisingEvents = true
+            };
+
+            watcher.Changed += (sender, e) => ScheduleWatchReload();
+            watcher.Created += (sender, e) => ScheduleWatchReload();
+            watcher.Renamed += (sender, e) => ScheduleWatchReload();
+
+            var shutdown = new ManualResetEvent(false);
+            Console.CancelKeyPress += (sender, e) =>
+            {
+                e.Cancel = true;
+                shutdown.Set();
+            };
+
+            shutdown.WaitOne();
+
+            watcher.Dispose();
+            if (_watchHostProcess != null && !_watchHostProcess.HasExited)
+            {
+                _watchHostProcess.Kill();
+                _watchHostProcess.WaitForExit(5000);
+            }
+
+            Console.WriteLine("[netman watch] Stopped.");
+            return 0;
+        }
+
+        static Process _watchHostProcess;
+        static System.Timers.Timer _watchDebounceTimer;
+        static string _watchSlnPath;
+        static string _watchExePath;
+        static string[] _watchStartArgs;
+        static object _watchReloadLock = new object();
+
+        static void ScheduleWatchReload()
+        {
+            lock (_watchReloadLock)
+            {
+                if (_watchDebounceTimer != null)
+                {
+                    _watchDebounceTimer.Stop();
+                    _watchDebounceTimer.Dispose();
+                }
+                _watchDebounceTimer = new System.Timers.Timer(1500);
+                _watchDebounceTimer.AutoReset = false;
+                _watchDebounceTimer.Elapsed += (s, evt) =>
+                {
+                    Console.WriteLine("");
+                    Console.WriteLine("[netman watch] Change detected: rebuilding...");
+                    if (_watchHostProcess != null && !_watchHostProcess.HasExited)
+                    {
+                        _watchHostProcess.Kill();
+                        _watchHostProcess.WaitForExit(5000);
+                    }
+                    BuildSolution(_watchSlnPath);
+                    _watchHostProcess = StartHost(_watchExePath, _watchStartArgs);
+                };
+                _watchDebounceTimer.Start();
+            }
+        }
+
+        static Process StartHost(string exePath, string[] args)
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = exePath,
+                Arguments = string.Join(" ", args),
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            return Process.Start(startInfo);
+        }
+
+        static void BuildSolution(string slnPath)
+        {
+            try
+            {
+                var buildInfo = new ProcessStartInfo
+                {
+                    FileName = "msbuild",
+                    Arguments = "\"" + slnPath + "\" /p:Configuration=Debug /nologo /v:quiet",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using (var build = Process.Start(buildInfo))
+                {
+                    build.WaitForExit();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[netman watch] Build failed: " + ex.Message);
+            }
+        }
+
         static int ExecuteStop(CommandLineArgs args)
         {
             string pipeName = args.PipeName ?? Contracts.ReloadMessages.DefaultPipeName;
@@ -246,6 +395,7 @@ namespace HotReloadTool.Host
             Console.WriteLine("  --debounce <ms>        Debounce interval (default: 500).");
             Console.WriteLine("  --drain-timeout <ms>   Connection drain timeout (default: 3000).");
             Console.WriteLine("  --pipe-name <name>     Named Pipes endpoint (default: hotreload-state).");
+            Console.WriteLine("  --watch, -w            Watch src/ for .cs changes and auto-rebuild.");
         }
     }
 }

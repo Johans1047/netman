@@ -41,6 +41,9 @@ namespace HotReloadTool.Host
         /// <summary>Override for Named Pipes endpoint name.</summary>
         public string PipeName { get; set; }
 
+        /// <summary>Watch source files for changes and auto-rebuild.</summary>
+        public bool Watch { get; set; }
+
         /// <summary>Unparsed arguments that did not match known options.</summary>
         public List<string> UnrecognizedArgs { get; set; }
 
@@ -136,6 +139,11 @@ namespace HotReloadTool.Host
                         result.PipeName = args[++i];
                     else
                         result.Errors.Add("Missing value for --pipe-name.");
+                }
+                else if (arg.Equals("--watch", StringComparison.OrdinalIgnoreCase) ||
+                         arg.Equals("-w", StringComparison.OrdinalIgnoreCase))
+                {
+                    result.Watch = true;
                 }
                 else if (!string.IsNullOrEmpty(arg) && arg[0] != '-')
                 {
