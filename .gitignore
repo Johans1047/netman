@@ -1,0 +1,53 @@
+## .NET Framework / Visual Studio
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.log
+
+# Visual Studio
+.vs/
+*.ncb
+*.sdf
+*.opensdf
+
+# vscode
+.NuGet
+.vscode
+.atl
+
+# Packages (NuGet restore)
+packages/
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+bld/
+[Bb]in/
+[Oo]bj/
+
+# Test Results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# Local
+*.tlog
+*.lastbuildstate
+
+# Dev
+exploration-hotreload.md

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{C3D4E5F6-A7B8-9012-CDEF-123456789012}</ProjectGuid>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>HotReloadTool.Host</RootNamespace>
+    <AssemblyName>HotReloadTool.Host</AssemblyName>
+    <TargetFrameworkVersion>v4.5.1</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Microsoft.Build" />
+    <Reference Include="Microsoft.Build.Framework" />
+    <Reference Include="Newtonsoft.Json, Version=9.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed">
+      <HintPath>..\..\packages\Newtonsoft.Json.9.0.1\lib\net45\Newtonsoft.Json.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+    <ItemGroup>
+    <Compile Include="BuildOrchestrator.cs" />
+    <Compile Include="ShadowCopyManager.cs" />
+    <Compile Include="ProcessManager.cs" />
+    <Compile Include="DrainCoordinator.cs" />
+    <Compile Include="StateTransferHost.cs" />
+    <Compile Include="CliMessages.cs" />
+    <Compile Include="CliCommandServer.cs" />
+    <Compile Include="CliCommandClient.cs" />
+    <Compile Include="Program.cs" />
+    <Compile Include="CommandLineArgs.cs" />
+    <Compile Include="MsBuildCompatibilityValidator.cs" />
+    <Compile Include="ReloadOrchestrator.cs" />
+      <Compile Include="Properties\AssemblyInfo.cs" />
+    </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Contracts\HotReloadTool.Contracts.csproj">
+      <Project>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</Project>
+      <Name>HotReloadTool.Contracts</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\Common\HotReloadTool.Common.csproj">
+      <Project>{B2C3D4E5-F6A7-8901-BCDE-F12345678901}</Project>
+      <Name>HotReloadTool.Common</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\Worker\HotReloadTool.Worker.csproj">
+      <Project>{F7A8B9C0-D1E2-3456-ABCD-567890123456}</Project>
+      <Name>HotReloadTool.Worker</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>
