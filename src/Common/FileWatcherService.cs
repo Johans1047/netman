@@ -118,6 +118,9 @@ namespace HotReloadTool.Common
         /// <summary>
         /// Tests whether the given file path matches the extension filter and
         /// does NOT match any exclusion pattern. Public for unit testing.
+        /// Handles compound extensions such as <c>.aspx.vb</c> by matching
+        /// against the full file name rather than only the last extension
+        /// segment (which <see cref="Path.GetExtension"/> would return).
         /// </summary>
         /// <param name="filePath">Absolute or relative file path.</param>
         /// <returns><c>true</c> if the file should trigger a reload.</returns>
@@ -126,15 +129,13 @@ namespace HotReloadTool.Common
             if (string.IsNullOrEmpty(filePath))
                 return false;
 
-            string extension = Path.GetExtension(filePath);
-            if (string.IsNullOrEmpty(extension))
-                return false;
+            string fileName = Path.GetFileName(filePath);
 
             bool matchesExtension = _config.Extensions != null
                 && _config.Extensions.Any(e =>
                 {
                     string pattern = e.TrimStart('*');
-                    return extension.Equals(pattern, StringComparison.OrdinalIgnoreCase);
+                    return fileName.EndsWith(pattern, StringComparison.OrdinalIgnoreCase);
                 });
 
             if (!matchesExtension)

@@ -51,3 +51,6 @@ Desktop.ini
 
 # Dev
 exploration-hotreload.md
+
+# Scripts de prueba locales (contienen o probaban credenciales de dev)
+test-autologin-*.js

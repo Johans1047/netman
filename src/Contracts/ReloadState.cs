@@ -29,6 +29,12 @@ namespace HotReloadTool.Contracts
         /// <summary>Launching new worker from shadow copy.</summary>
         LaunchingNew,
 
+        /// <summary>Copying build output into the web site Bin folder (build-recycle mode).</summary>
+        Deploying,
+
+        /// <summary>Touching the recycle target so ASP.NET recycles the AppDomain (build-recycle mode).</summary>
+        Recycling,
+
         /// <summary>Reload cycle failed (build error, timeout, etc.).</summary>
         Failed
     }

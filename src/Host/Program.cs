@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using HotReloadTool.Common;
 using HotReloadTool.Contracts;
@@ -49,6 +51,15 @@ namespace HotReloadTool.Host
                 var config = new ReloadConfiguration
                 {
                     ProjectPath = args.ProjectPath,
+                    SolutionProjectName = args.SolutionProjectName,
+                    Mode = args.Mode,
+                    ExtensionsCsv = args.ExtensionsCsv,
+                    DeployToDirectory = args.DeployToDirectory,
+                    RecycleTargetPath = args.RecycleTargetPath,
+                    DeployPdb = args.DeployPdb,
+                    WebWatchDirectory = args.WebWatchDirectory,
+                    WebExtensionsCsv = args.WebExtensionsCsv,
+                    SiteBaseUrl = args.SiteUrl,
                     DebounceMilliseconds = args.DebounceMilliseconds ?? 500,
                     DrainTimeoutMilliseconds = args.DrainTimeoutMilliseconds ?? 3000,
                     StateTransferTimeoutMilliseconds = 5000,
@@ -57,6 +68,24 @@ namespace HotReloadTool.Host
                 };
 
                 config.Validate();
+
+                // Build-recycle: fail fast on a missing --recycle-target before
+                // watching — recycling cannot succeed without a real file.
+                if (config.Mode == ReloadMode.BuildRecycle && !File.Exists(config.RecycleTargetPath))
+                {
+                    Console.Error.WriteLine("ERROR: --recycle-target file not found: " + config.RecycleTargetPath);
+                    return 1;
+                }
+
+                // Web watch implies build-recycle: it only recycles the
+                // AppDomain, which requires a recycle target. Reject the
+                // combination up front instead of failing mid-flight.
+                if (!string.IsNullOrWhiteSpace(config.WebWatchDirectory)
+                    && config.Mode != ReloadMode.BuildRecycle)
+                {
+                    Console.Error.WriteLine("ERROR: --web-watch requires --mode build-recycle (recycle needs a target).");
+                    return 1;
+                }
 
                 // MSBuild compatibility validation (Phase 1 task 1.7)
                 MsBuildCompatibilityValidator.ValidateRuntime();
@@ -118,6 +147,19 @@ namespace HotReloadTool.Host
                 Console.WriteLine("  Debounce: " + config.DebounceMilliseconds + "ms");
                 Console.WriteLine("  Drain timeout: " + config.DrainTimeoutMilliseconds + "ms");
                 Console.WriteLine("  Pipe: " + config.PipeName);
+                if (config.Mode == ReloadMode.BuildRecycle)
+                {
+                    Console.WriteLine("  Mode: build-recycle");
+                    Console.WriteLine("  Deploy to: " + config.DeployToDirectory);
+                    Console.WriteLine("  Recycle target: " + config.RecycleTargetPath);
+                }
+                if (!string.IsNullOrWhiteSpace(config.WebWatchDirectory))
+                {
+                    Console.WriteLine("  Web watch: " + config.WebWatchDirectory);
+                    Console.WriteLine("  Web extensions: " + string.Join(", ", config.WebExtensions));
+                    if (!string.IsNullOrWhiteSpace(config.SiteBaseUrl))
+                        Console.WriteLine("  Site URL: " + config.SiteBaseUrl);
+                }
                 Console.WriteLine("Press Ctrl+C or Enter to stop.");
 
                 // Start the orchestrator
@@ -169,11 +211,11 @@ namespace HotReloadTool.Host
         /// </summary>
         static int ExecuteWatch(CommandLineArgs args)
         {
-            // BaseDirectory is src\Host\bin\Debug\ -> go up to solution root
+            // BaseDirectory is src\Host\bin\Debug\ -> go up to solution root (netman\)
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            string srcDir = Path.Combine(baseDir, "..", "..", "..", "src");
+            string srcDir = Path.Combine(baseDir, "..", "..", "..", "..", "src");
             srcDir = Path.GetFullPath(srcDir);
-            string slnPath = Path.Combine(baseDir, "..", "..", "..", "HotReloadTool.sln");
+            string slnPath = Path.Combine(baseDir, "..", "..", "..", "..", "HotReloadTool.sln");
             slnPath = Path.GetFullPath(slnPath);
             string exePath = Process.GetCurrentProcess().MainModule.FileName;
 
@@ -183,43 +225,33 @@ namespace HotReloadTool.Host
 
             BuildSolution(slnPath);
 
-            var startArgs = new System.Collections.Generic.List<string> { "start" };
-            if (!string.IsNullOrEmpty(args.ProjectPath))
-            {
-                startArgs.Add("-p");
-                startArgs.Add(args.ProjectPath);
-            }
-            if (args.DebounceMilliseconds.HasValue)
-            {
-                startArgs.Add("--debounce");
-                startArgs.Add(args.DebounceMilliseconds.Value.ToString());
-            }
-            if (args.DrainTimeoutMilliseconds.HasValue)
-            {
-                startArgs.Add("--drain-timeout");
-                startArgs.Add(args.DrainTimeoutMilliseconds.Value.ToString());
-            }
-            if (!string.IsNullOrEmpty(args.PipeName))
-            {
-                startArgs.Add("--pipe-name");
-                startArgs.Add(args.PipeName);
-            }
+            // Child args are built by CommandLineArgs.BuildWatchStartArgs so the
+            // build-recycle flags (--mode, --extensions, --deploy-to,
+            // --recycle-target) are forwarded when set.
+            var startArgs = args.BuildWatchStartArgs();
 
-            _watchHostProcess = StartHost(exePath, startArgs.ToArray());
+            _watchHostProcess = StartHost(exePath, startArgs);
             _watchDebounceTimer = null;
             _watchSlnPath = slnPath;
             _watchExePath = exePath;
-            _watchStartArgs = startArgs.ToArray();
+            _watchStartArgs = startArgs;
 
-            var watcher = new FileSystemWatcher(srcDir, "*.cs")
+            // One watcher per configured extension, all sharing the debounce
+            // timer in ScheduleWatchReload (thread-safe under _watchReloadLock).
+            string[] extensions = ParseWatchExtensions(args.ExtensionsCsv);
+            _watchWatchers = new List<FileSystemWatcher>();
+            foreach (string ext in extensions)
             {
-                IncludeSubdirectories = true,
-                EnableRaisingEvents = true
-            };
-
-            watcher.Changed += (sender, e) => ScheduleWatchReload();
-            watcher.Created += (sender, e) => ScheduleWatchReload();
-            watcher.Renamed += (sender, e) => ScheduleWatchReload();
+                var watcher = new FileSystemWatcher(srcDir, ext)
+                {
+                    IncludeSubdirectories = true,
+                    EnableRaisingEvents = true
+                };
+                watcher.Changed += (sender, e) => ScheduleWatchReload();
+                watcher.Created += (sender, e) => ScheduleWatchReload();
+                watcher.Renamed += (sender, e) => ScheduleWatchReload();
+                _watchWatchers.Add(watcher);
+            }
 
             var shutdown = new ManualResetEvent(false);
             Console.CancelKeyPress += (sender, e) =>
@@ -230,7 +262,7 @@ namespace HotReloadTool.Host
 
             shutdown.WaitOne();
 
-            watcher.Dispose();
+            DisposeWatchWatchers();
             if (_watchHostProcess != null && !_watchHostProcess.HasExited)
             {
                 _watchHostProcess.Kill();
@@ -246,6 +278,7 @@ namespace HotReloadTool.Host
         static string _watchSlnPath;
         static string _watchExePath;
         static string[] _watchStartArgs;
+        static List<FileSystemWatcher> _watchWatchers;
         static object _watchReloadLock = new object();
 
         static void ScheduleWatchReload()
@@ -273,6 +306,43 @@ namespace HotReloadTool.Host
                 };
                 _watchDebounceTimer.Start();
             }
+        }
+
+        /// <summary>
+        /// Parses the extensions CSV (e.g. <c>"*.vb,*.config"</c>) into a filter
+        /// list. Falls back to <c>["*.cs"]</c> when not specified, preserving the
+        /// original single-extension watch behavior.
+        /// </summary>
+        static string[] ParseWatchExtensions(string csv)
+        {
+            if (string.IsNullOrWhiteSpace(csv))
+                return new[] { "*.cs" };
+
+            var parts = csv
+                .Split(',')
+                .Select(s => s.Trim())
+                .Where(s => !string.IsNullOrEmpty(s))
+                .ToArray();
+
+            return parts.Length > 0 ? parts : new[] { "*.cs" };
+        }
+
+        static void DisposeWatchWatchers()
+        {
+            if (_watchWatchers == null)
+                return;
+            foreach (var watcher in _watchWatchers)
+            {
+                try
+                {
+                    watcher.Dispose();
+                }
+                catch
+                {
+                    // Best-effort cleanup.
+                }
+            }
+            _watchWatchers = null;
         }
 
         static Process StartHost(string exePath, string[] args)
@@ -391,11 +461,30 @@ namespace HotReloadTool.Host
             Console.WriteLine("  help      Print this help text.");
             Console.WriteLine();
             Console.WriteLine("Options:");
-            Console.WriteLine("  --project, -p <path>   Path to the worker .csproj (required for start).");
+            Console.WriteLine("  --project, -p <path>   Path to the worker .csproj or .sln (required for start).");
+            Console.WriteLine("  --solution-project, -sp <name>  Project name within a .sln to deploy (required for solutions).");
+            Console.WriteLine("  --mode <mode>          Reload mode: process (default) or build-recycle.");
+            Console.WriteLine("  --extensions <csv>     Comma-separated watch extensions (default: *.cs,*.config).");
+            Console.WriteLine("  --deploy-to <dir>      Copy build output here (required for build-recycle).");
+            Console.WriteLine("  --recycle-target <file> Touch this file to recycle ASP.NET (required for build-recycle).");
+            Console.WriteLine("  --web-watch <dir>      Also watch this directory for web-file changes (.aspx/.aspx.vb).");
+            Console.WriteLine("                         Requires --mode build-recycle. Changes here skip the build");
+            Console.WriteLine("                         and go straight to recycle.");
+            Console.WriteLine("  --web-extensions <csv> Comma-separated web-watch extensions (default: *.aspx,*.aspx.vb).");
+            Console.WriteLine("  --site-url <url>       Base URL of the running site (e.g. http://localhost:12345/SIPAF/).");
+            Console.WriteLine("                         With --web-watch, prints the direct URL of the changed page");
+            Console.WriteLine("                         after each web-file recycle.");
+            Console.WriteLine("  --no-pdb               Skip deploying the .pdb alongside the DLL.");
             Console.WriteLine("  --debounce <ms>        Debounce interval (default: 500).");
             Console.WriteLine("  --drain-timeout <ms>   Connection drain timeout (default: 3000).");
             Console.WriteLine("  --pipe-name <name>     Named Pipes endpoint (default: hotreload-state).");
-            Console.WriteLine("  --watch, -w            Watch src/ for .cs changes and auto-rebuild.");
+            Console.WriteLine("  --watch, -w            Watch src/ for changes and auto-rebuild.");
+            Console.WriteLine();
+            Console.WriteLine("Modes:");
+            Console.WriteLine("  process        Build, shadow-copy, drain, and relaunch the worker .exe (default).");
+            Console.WriteLine("  build-recycle  Build a library, deploy to --deploy-to, touch --recycle-target.");
+            Console.WriteLine();
+            Console.WriteLine("When --project points to a .sln, use --solution-project to pick the output project.");
         }
     }
 }

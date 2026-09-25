@@ -26,6 +26,7 @@ namespace HotReloadTool.Host.Tests
         {
             public bool ShouldSucceed { get; set; }
             public int DelayMilliseconds { get; set; }
+            public string OutputAssemblyPath { get; set; }
 
             private int _buildCount;
             public int BuildCount { get { return _buildCount; } }
@@ -37,7 +38,12 @@ namespace HotReloadTool.Host.Tests
                     Thread.Sleep(DelayMilliseconds);
 
                 if (ShouldSucceed)
-                    return new BuildResult { Success = true, Output = new List<string>() };
+                    return new BuildResult
+                    {
+                        Success = true,
+                        Output = new List<string>(),
+                        OutputAssemblyPath = OutputAssemblyPath
+                    };
                 return BuildResult.Failed("simulated build failure");
             }
         }
@@ -471,6 +477,165 @@ namespace HotReloadTool.Host.Tests
                 Thread.Sleep(800); // Wait for completion
 
                 Assert.False(orchestrator.IsReloading);
+            }
+        }
+
+        // Phase 2/3: Build-recycle deploy + recycle success → Deploying → Recycling → Idle
+        [Fact]
+        public void BuildRecycle_DeploySucceeds_ProceedsThroughRecyclingToIdle()
+        {
+            string tempRoot = Path.Combine(Path.GetTempPath(), "hotreload-recycle-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+            try
+            {
+                string source = Path.Combine(tempRoot, "Lib.dll");
+                File.WriteAllText(source, "assembly-content");
+                string deployDir = Path.Combine(tempRoot, "site", "Bin");
+
+                string recycleTarget = Path.Combine(tempRoot, "web.config");
+                File.WriteAllText(recycleTarget, "<configuration/>");
+                DateTime recycleWriteBefore = DateTime.UtcNow.AddMinutes(-5);
+                File.SetLastWriteTimeUtc(recycleTarget, recycleWriteBefore);
+                byte[] recycleBytesBefore = File.ReadAllBytes(recycleTarget);
+
+                var config = CreateConfig();
+                config.Mode = ReloadMode.BuildRecycle;
+                config.DeployToDirectory = deployDir;
+                config.RecycleTargetPath = recycleTarget;
+
+                var watcher = new FakeFileWatcherService();
+                var build = new FakeBuildOrchestrator { ShouldSucceed = true, OutputAssemblyPath = source };
+                var states = new List<ReloadState>();
+
+                using (var orchestrator = CreateOrchestrator(config, watcher, build: build))
+                {
+                    orchestrator.StateChanged += (s, e) => states.Add(e.NewState);
+                    orchestrator.Start();
+                    watcher.RaiseFileChanged();
+
+                    // Wait for the full cycle: Recycling observed AND back to Idle
+                    Assert.True(WaitFor(
+                        () => states.Contains(ReloadState.Recycling) && orchestrator.State == ReloadState.Idle,
+                        5000),
+                        "Cycle should reach Recycling and settle to Idle.");
+
+                    Assert.Contains(ReloadState.Deploying, states);
+                    Assert.Contains(ReloadState.Recycling, states);
+                    Assert.Equal(1, build.BuildCount);
+
+                    string deployed = Path.Combine(deployDir, "Lib.dll");
+                    Assert.True(File.Exists(deployed), "Build output should be deployed to DeployToDirectory.");
+                    Assert.Equal("assembly-content", File.ReadAllText(deployed));
+
+                    // Recycle must have touched the target: mtime advanced,
+                    // content byte-identical.
+                    Assert.True(File.GetLastWriteTimeUtc(recycleTarget) > recycleWriteBefore,
+                        "Recycle target LastWrite should advance.");
+                    Assert.Equal(recycleBytesBefore, File.ReadAllBytes(recycleTarget));
+                }
+            }
+            finally
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+
+        // Phase 2: Build-recycle deploy failure → skip Recycling, settle to Failed
+        [Fact]
+        public void BuildRecycle_DeployFails_SkipsRecyclingAndSettlesFailed()
+        {
+            string tempRoot = Path.Combine(Path.GetTempPath(), "hotreload-recycle-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+            try
+            {
+                string deployDir = Path.Combine(tempRoot, "site", "Bin");
+
+                var config = CreateConfig();
+                config.Mode = ReloadMode.BuildRecycle;
+                config.DeployToDirectory = deployDir;
+                config.RecycleTargetPath = Path.Combine(tempRoot, "web.config");
+
+                var watcher = new FakeFileWatcherService();
+                // Build succeeds but the output assembly does not exist —
+                // LibraryDeployer's guard returns a structured failure.
+                var build = new FakeBuildOrchestrator
+                {
+                    ShouldSucceed = true,
+                    OutputAssemblyPath = Path.Combine(tempRoot, "missing-output.dll")
+                };
+                var states = new List<ReloadState>();
+
+                using (var orchestrator = CreateOrchestrator(config, watcher, build: build))
+                {
+                    orchestrator.StateChanged += (s, e) => states.Add(e.NewState);
+                    orchestrator.Start();
+                    watcher.RaiseFileChanged();
+
+                    // Mirror of the build-failure gate: settle to Failed
+                    Assert.True(WaitFor(() => orchestrator.State == ReloadState.Failed, 5000),
+                        "Deploy failure should settle the cycle to Failed.");
+
+                    Assert.Contains(ReloadState.Deploying, states);
+                    Assert.DoesNotContain(ReloadState.Recycling, states);
+                    Assert.Equal(1, build.BuildCount);
+                    Assert.False(Directory.Exists(deployDir), "Deploy directory should not be created on guard failure.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+
+        // Phase 3: Build-recycle recycle failure → Recycling observed → Failed
+        // (mirrors the deploy-failure gate: log + Failed, but recycling already ran)
+        [Fact]
+        public void BuildRecycle_RecycleFails_ObservesRecyclingAndSettlesFailed()
+        {
+            string tempRoot = Path.Combine(Path.GetTempPath(), "hotreload-recycle-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+            try
+            {
+                string source = Path.Combine(tempRoot, "Lib.dll");
+                File.WriteAllText(source, "assembly-content");
+                string deployDir = Path.Combine(tempRoot, "site", "Bin");
+
+                var config = CreateConfig();
+                config.Mode = ReloadMode.BuildRecycle;
+                config.DeployToDirectory = deployDir;
+                // Recycle target deliberately missing — AppDomainRecycler's
+                // guard returns a structured failure.
+                config.RecycleTargetPath = Path.Combine(tempRoot, "missing-web.config");
+
+                var watcher = new FakeFileWatcherService();
+                var build = new FakeBuildOrchestrator { ShouldSucceed = true, OutputAssemblyPath = source };
+                var states = new List<ReloadState>();
+
+                using (var orchestrator = CreateOrchestrator(config, watcher, build: build))
+                {
+                    orchestrator.StateChanged += (s, e) => states.Add(e.NewState);
+                    orchestrator.Start();
+                    watcher.RaiseFileChanged();
+
+                    // Mirror of the deploy-failure gate: settle to Failed
+                    Assert.True(WaitFor(() => orchestrator.State == ReloadState.Failed, 5000),
+                        "Recycle failure should settle the cycle to Failed.");
+
+                    Assert.Contains(ReloadState.Deploying, states);
+                    // Unlike the deploy gate, the Recycling state IS entered
+                    // (deploy already succeeded) before failing.
+                    Assert.Contains(ReloadState.Recycling, states);
+                    Assert.DoesNotContain(ReloadState.Idle, states);
+                    Assert.Equal(1, build.BuildCount);
+
+                    // Deploy must have succeeded before the recycle attempt.
+                    Assert.True(File.Exists(Path.Combine(deployDir, "Lib.dll")),
+                        "Deploy should succeed before the recycle attempt.");
+                }
+            }
+            finally
+            {
+                Directory.Delete(tempRoot, recursive: true);
             }
         }
     }

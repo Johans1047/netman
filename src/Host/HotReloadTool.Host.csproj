@@ -37,7 +37,9 @@
   </ItemGroup>
     <ItemGroup>
     <Compile Include="BuildOrchestrator.cs" />
-    <Compile Include="ShadowCopyManager.cs" />
+    <Compile Include="LibraryDeployer.cs" />
+    <Compile Include="AppDomainRecycler.cs" />
+      <Compile Include="ShadowCopyManager.cs" />
     <Compile Include="ProcessManager.cs" />
     <Compile Include="DrainCoordinator.cs" />
     <Compile Include="StateTransferHost.cs" />

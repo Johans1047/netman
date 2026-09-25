@@ -25,6 +25,9 @@ HotReloadTool.Host <command> [options]
 | `--debounce <ms>` | — | `500` | Debounce interval in milliseconds. Rapid file changes within this window are coalesced into a single reload cycle. |
 | `--drain-timeout <ms>` | — | `3000` | Maximum time in milliseconds to wait for connection draining before force-terminating the old worker. |
 | `--pipe-name <name>` | — | `hotreload-state` | Named Pipes endpoint name for Host↔Worker IPC. |
+| `--web-watch <dir>` | — | — | Also watch this directory for web-file changes (`.aspx`/`.aspx.vb`). Requires `--mode build-recycle`; changes here skip the build and go straight to recycle. |
+| `--web-extensions <csv>` | — | `*.aspx,*.aspx.vb` | Comma-separated web-watch extensions. |
+| `--site-url <url>` | — | — | Base URL of the running site, e.g. `http://localhost:12345/SIPAF/`. With `--web-watch`, netman prints the direct URL of the changed page after each web-file recycle (code-behind changes map to their `.aspx`). |
 
 ### Additional defaults (not exposed as CLI flags)
 
@@ -158,6 +161,14 @@ Hot Reload Host starting...
   Drain timeout: 3000ms
   Pipe: hotreload-state
 Press Ctrl+C or Enter to stop.
+```
+
+When `--web-watch` and `--site-url` are both set, each web-file recycle also prints the changed page's URL:
+
+```
+[14:32:10] State: Watching -> Recycling
+[14:32:10] State: Recycling -> Watching
+  URL: http://localhost:12345/SIPAF/AdministracionSistema/Seguridad/Usuarios/wUsuarios.aspx
 ```
 
 ### Shutdown

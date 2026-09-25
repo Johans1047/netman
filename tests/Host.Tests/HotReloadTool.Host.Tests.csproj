@@ -50,6 +50,8 @@
   </ItemGroup>
     <ItemGroup>
       <Compile Include="BuildOrchestratorTests.cs" />
+      <Compile Include="LibraryDeployerTests.cs" />
+      <Compile Include="AppDomainRecyclerTests.cs" />
       <Compile Include="ShadowCopyManagerTests.cs" />
       <Compile Include="ProcessManagerTests.cs" />
       <Compile Include="DrainCoordinatorTests.cs" />

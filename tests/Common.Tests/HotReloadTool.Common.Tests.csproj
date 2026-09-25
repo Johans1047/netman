@@ -49,6 +49,7 @@
     <Compile Include="ReloadConfigurationTests.cs" />
     <Compile Include="FileWatcherServiceTests.cs" />
     <Compile Include="CommandLineArgsTests.cs" />
+    <Compile Include="WatchStartArgsTests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
