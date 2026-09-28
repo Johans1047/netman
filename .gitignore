@@ -6,6 +6,10 @@ obj/
 *.cache
 *.log
 
+# Config local de netman (rutas/usuario de la maquina de cada uno; la clave
+# nunca vive aca, va a Windows Credential Manager). No commitear.
+netman.config.json
+
 # Visual Studio
 .vs/
 *.ncb
