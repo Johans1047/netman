@@ -1,9 +1,9 @@
-
 using System;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Text;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace NetmanConfigTool
@@ -11,48 +11,59 @@ namespace NetmanConfigTool
     /// <summary>
     /// Prototipo v0.5 del GUI de configuración de netman.
     ///
-    /// Reemplaza la parte de "pegarle a los parametros por defecto de
-    /// Start-Netman.ps1 a mano" por un formulario: guarda las rutas y la URL
-    /// en netman.config.json (no secreto) y la clave de SIPAF en Windows
-    /// Credential Manager (nunca en disco, nunca en la linea de comandos).
-    /// "Guardar e iniciar netman" lanza Start-Netman.ps1 con esos valores,
-    /// pasando la clave por variable de entorno del proceso hijo -- mismo
-    /// mecanismo que ya usa el propio script para el Host y el browser.
+    /// Guarda las rutas y la URL en netman.config.json (no secreto) y la
+    /// clave de SIPAF en Windows Credential Manager (nunca en disco, nunca
+    /// en la linea de comandos). "Iniciar netman" lanza el Host y el
+    /// navegador de hot-reload directamente (sin pasar por Start-Netman.ps1
+    /// ni por ventanas de consola sueltas) con su stdout/stderr redirigido
+    /// al panel de logs de este mismo formulario.
     /// </summary>
     public partial class ConfigForm : Form
     {
         private readonly string _netmanRoot;
         private readonly string _configPath;
-        private readonly string _startScriptPath;
+        private readonly string _hostExePath;
+        private readonly string _browserJsPath;
+
+        private Process _hostProcess;
+        private Process _browserProcess;
 
         public ConfigForm()
         {
             InitializeComponent();
 
+            try
+            {
+                Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            }
+            catch
+            {
+                // Sin icono no es motivo para no arrancar.
+            }
+
             _netmanRoot = FindNetmanRoot();
             _configPath = NetmanConfig.DefaultPath(_netmanRoot);
-            _startScriptPath = Path.Combine(_netmanRoot, "Start-Netman.ps1");
+            _hostExePath = Path.Combine(_netmanRoot, "src", "Host", "bin", "Debug", "HotReloadTool.Host.exe");
+            _browserJsPath = Path.Combine(_netmanRoot, "netman-hotreload-browser.js");
 
             Load += ConfigForm_Load;
+            FormClosing += ConfigForm_FormClosing;
         }
 
         /// <summary>
-        /// Sube desde bin\Debug (o bin\Release) de src\ConfigTool hasta la raiz
-        /// de netman buscando un marcador (Start-Netman.ps1, o HotReloadTool.sln
-        /// como respaldo). Esto cubre Debug y Release y cualquier profundidad sin
-        /// depender de contar niveles a mano. Si el .exe se movio/empaqueto suelto
-        /// en otro lado (sin marcador arriba), cae a la carpeta del .exe -- el
-        /// usuario puede corregir las rutas a mano igual.
+        /// Sube desde donde esté el .exe (bin\Debug o bin\Release de
+        /// src\ConfigTool, normalmente) buscando Start-Netman.ps1 como marca
+        /// de la raiz de netman. Así no importa cuántos niveles de carpeta
+        /// haya exactamente -- si en algún momento se empaqueta/mueve el
+        /// .exe suelto a otro lado, no lo encuentra y cae a la carpeta del
+        /// .exe (el usuario corrige las rutas a mano igual).
         /// </summary>
         private static string FindNetmanRoot()
         {
             var dir = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
-            // Subimos un numero acotado de niveles buscando el marcador; 5 cubre
-            // Debug/Release y margenes razonables.
-            for (int i = 0; i < 5 && dir != null; i++)
+            for (int i = 0; i < 6 && dir != null; i++)
             {
-                if (File.Exists(Path.Combine(dir.FullName, "Start-Netman.ps1"))
-                    || File.Exists(Path.Combine(dir.FullName, "HotReloadTool.sln")))
+                if (File.Exists(Path.Combine(dir.FullName, "Start-Netman.ps1")))
                 {
                     return dir.FullName;
                 }
@@ -85,8 +96,26 @@ namespace NetmanConfigTool
             }
 
             SetStatus(savedPass != null
-                ? "Config cargada. Hay una clave guardada -- dejá la casilla de clave en blanco para conservarla."
+                ? "Config cargada. Hay una clave guardada -- Mantén la casilla de clave en blanco para conservarla."
                 : "Config cargada. Todavía no hay clave guardada en Credential Manager.", false);
+
+            if (Debugger.IsAttached)
+            {
+                AppendLog("GUI", "AVISO: estás corriendo con el debugger de Visual Studio adjunto (F5). "
+                    + "Si parás la depuración mientras el Host o el navegador siguen corriendo, VS puede "
+                    + "matarlos junto con este proceso. Usá Ctrl+F5 la próxima vez.");
+            }
+        }
+
+        private void ConfigForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            StopProcess(ref _browserProcess, "Browser");
+            StopProcess(ref _hostProcess, "Host");
+        }
+
+        private void btnCerrar_Click(object sender, EventArgs e)
+        {
+            Close();
         }
 
         private void btnBrowseLibreria_Click(object sender, EventArgs e)
@@ -115,7 +144,7 @@ namespace NetmanConfigTool
 
         private void btnProbarSitio_Click(object sender, EventArgs e)
         {
-            string baseUrl = txtSiteUrl.Text.TrimEnd('/');
+            string baseUrl = txtSiteUrl.Text;
             if (string.IsNullOrWhiteSpace(baseUrl))
             {
                 SetStatus("Falta la URL base del sitio.", true);
@@ -126,14 +155,31 @@ namespace NetmanConfigTool
             SetStatus("Probando " + baseUrl + " ...", false);
             Application.DoEvents();
 
+            string message;
+            bool ok = ProbeSite(baseUrl, out message);
+            SetStatus(message, !ok);
+            btnProbarSitio.Enabled = true;
+        }
+
+        /// <summary>
+        /// GET a wInicio.aspx: cualquier respuesta HTTP (incluso un 302/401)
+        /// ya dice que IIS Express está arriba. Mismo chequeo que el Paso 0
+        /// de Start-Netman.ps1.
+        /// </summary>
+        private static bool ProbeSite(string baseUrl, out string message)
+        {
             try
             {
-                var request = (HttpWebRequest)WebRequest.Create(baseUrl + "/wInicio.aspx");
+                var request = (HttpWebRequest)WebRequest.Create(baseUrl.TrimEnd('/') + "/wInicio.aspx");
                 request.Timeout = 4000;
                 request.Method = "GET";
+                // wInicio.aspx hace Request.UserAgent.ToLower() sin null-check:
+                // sin User-Agent el sitio tira 500. Un browser real siempre lo manda.
+                request.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) netman-probe/1.0";
                 using (var response = (HttpWebResponse)request.GetResponse())
                 {
-                    SetStatus("OK: el sitio respondió (" + (int)response.StatusCode + ").", false);
+                    message = "OK: el sitio respondió (" + (int)response.StatusCode + ").";
+                    return true;
                 }
             }
             catch (WebException wex)
@@ -141,22 +187,17 @@ namespace NetmanConfigTool
                 var resp = wex.Response as HttpWebResponse;
                 if (resp != null)
                 {
-                    // Un 302/401 a wInicio.aspx tambien cuenta como "el sitio esta arriba".
-                    SetStatus("El sitio respondió (" + (int)resp.StatusCode + ").", false);
+                    message = "El sitio respondió (" + (int)resp.StatusCode + ").";
+                    return true;
                 }
-                else
-                {
-                    SetStatus("No pude alcanzar el sitio: " + wex.Message
-                        + " (¿está levantado IIS Express? Paso 1 del arranque en frío.)", true);
-                }
+                message = "No pude alcanzar el sitio: " + wex.Message
+                    + " (¿está levantado IIS Express? Paso 1 del arranque en frío.)";
+                return false;
             }
             catch (Exception ex)
             {
-                SetStatus("No pude alcanzar el sitio: " + ex.Message, true);
-            }
-            finally
-            {
-                btnProbarSitio.Enabled = true;
+                message = "No pude alcanzar el sitio: " + ex.Message;
+                return false;
             }
         }
 
@@ -230,8 +271,14 @@ namespace NetmanConfigTool
             }
         }
 
-        private void btnIniciar_Click(object sender, EventArgs e)
+        private async void btnIniciar_Click(object sender, EventArgs e)
         {
+            if (_hostProcess != null || _browserProcess != null)
+            {
+                SetStatus("netman ya está corriendo -- usá \"Detener\" primero.", true);
+                return;
+            }
+
             NetmanConfig cfg;
             if (!TrySaveConfig(out cfg))
             {
@@ -246,53 +293,233 @@ namespace NetmanConfigTool
                 return;
             }
 
-            if (!File.Exists(_startScriptPath))
+            if (!File.Exists(_hostExePath))
             {
-                SetStatus("No encuentro Start-Netman.ps1 en " + _netmanRoot, true);
+                SetStatus("No encuentro " + _hostExePath + " -- compilá HotReloadTool.sln primero.", true);
+                return;
+            }
+            if (!File.Exists(_browserJsPath))
+            {
+                SetStatus("No encuentro " + _browserJsPath, true);
                 return;
             }
 
-            var args = new StringBuilder();
-            args.Append("-NoExit -ExecutionPolicy Bypass -File ")
-                .Append(Quote(_startScriptPath))
-                .Append(" -SipafUser ").Append(Quote(cfg.SipafUser))
-                .Append(" -LibreriaSipafProject ").Append(Quote(cfg.LibreriaSipafProject))
-                .Append(" -SipafSitePath ").Append(Quote(cfg.SipafSitePath))
-                .Append(" -SiteBaseUrl ").Append(Quote(cfg.SiteBaseUrl));
+            SetRunningState(true);
+            ClearLog();
+            SetStatus("Iniciando netman...", false);
 
-            var psi = new ProcessStartInfo
+            // Las dejamos en el entorno de ESTE proceso; StartTrackedProcess
+            // las propaga a los hijos (Host y node) -- nunca por linea de
+            // comandos ni a disco.
+            Environment.SetEnvironmentVariable("NETMAN_SIPAF_USER", cfg.SipafUser);
+            Environment.SetEnvironmentVariable("NETMAN_SIPAF_PASS", password);
+
+            AppendLog("GUI", "Verificando que el sitio responda en " + cfg.SiteBaseUrl + " ...");
+            string probeMessage = null;
+            await Task.Run(() => ProbeSite(cfg.SiteBaseUrl, out probeMessage));
+            AppendLog("GUI", probeMessage);
+
+            string deployTo = Path.Combine(cfg.SipafSitePath, "Bin");
+            string recycleTarget = Path.Combine(cfg.SipafSitePath, "web.config");
+
+            string hostArgs = "start --mode build-recycle -p " + Quote(cfg.LibreriaSipafProject)
+                + " --deploy-to " + Quote(deployTo)
+                + " --recycle-target " + Quote(recycleTarget)
+                + " --web-watch " + Quote(cfg.SipafSitePath)
+                + " --site-url " + Quote(cfg.SiteBaseUrl);
+
+            _hostProcess = StartTrackedProcess(_hostExePath, hostArgs, Path.GetDirectoryName(_hostExePath), "Host");
+            if (_hostProcess == null)
             {
-                FileName = "powershell.exe",
-                Arguments = args.ToString(),
-                WorkingDirectory = _netmanRoot,
-                UseShellExecute = false
-            };
-            // La clave viaja por variable de entorno del proceso hijo, no por
-            // linea de comandos (esa queda visible en el Administrador de
-            // tareas) ni escrita a disco. Start-Netman.ps1 ya sabe leer
-            // NETMAN_SIPAF_PASS de ahí si está presente.
-            psi.EnvironmentVariables["NETMAN_SIPAF_PASS"] = password;
+                SetRunningState(false);
+                return;
+            }
+            AppendLog("GUI", "Host lanzado (PID " + _hostProcess.Id + "). Esperando unos segundos antes del navegador...");
 
+            await Task.Delay(2000);
+
+            bool playwrightOk = await Task.Run(() => RunBlocking("node", "-e " + Quote("require.resolve('playwright')"), _netmanRoot, "node", false) == 0);
+            if (!playwrightOk)
+            {
+                AppendLog("GUI", "Playwright no está instalado todavía -- instalando (una sola vez, puede tardar)...");
+                bool installedOk = await Task.Run(() =>
+                    RunBlocking("cmd.exe", "/c npm install playwright", _netmanRoot, "npm", true) == 0
+                    && RunBlocking("cmd.exe", "/c npx playwright install chromium", _netmanRoot, "npx", true) == 0);
+                if (!installedOk)
+                {
+                    AppendLog("GUI", "ERROR: no se pudo instalar Playwright. Revisá el log de arriba.");
+                    SetRunningState(false);
+                    StopProcess(ref _hostProcess, "Host");
+                    return;
+                }
+            }
+
+            _browserProcess = StartTrackedProcess("node", Quote(_browserJsPath), _netmanRoot, "Browser");
+            if (_browserProcess == null)
+            {
+                SetRunningState(false);
+                StopProcess(ref _hostProcess, "Host");
+                return;
+            }
+
+            AppendLog("GUI", "Navegador de hot-reload lanzado (PID " + _browserProcess.Id + "). Editá y mirá los logs de abajo.");
+            SetStatus("Netman corriendo", false);
+        }
+
+        private void btnDetener_Click(object sender, EventArgs e)
+        {
+            AppendLog("GUI", "Deteniendo netman...");
+            StopProcess(ref _browserProcess, "Browser");
+            StopProcess(ref _hostProcess, "Host");
+            SetRunningState(false);
+            SetStatus("netman detenido.", false);
+        }
+
+        /// <summary>Lanza un proceso hijo con stdout/stderr redirigidos al panel de logs.</summary>
+        private Process StartTrackedProcess(string fileName, string arguments, string workingDirectory, string tag)
+        {
             try
             {
-                Process.Start(psi);
-                SetStatus("netman iniciado -- revisá las ventanas del Host y del navegador de hot-reload.", false);
+                var psi = new ProcessStartInfo
+                {
+                    FileName = fileName,
+                    Arguments = arguments,
+                    WorkingDirectory = workingDirectory,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                psi.EnvironmentVariables["NETMAN_SIPAF_USER"] = Environment.GetEnvironmentVariable("NETMAN_SIPAF_USER");
+                psi.EnvironmentVariables["NETMAN_SIPAF_PASS"] = Environment.GetEnvironmentVariable("NETMAN_SIPAF_PASS");
+
+                var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+                process.OutputDataReceived += (s, ev) => { if (ev.Data != null) AppendLog(tag, ev.Data); };
+                process.ErrorDataReceived += (s, ev) => { if (ev.Data != null) AppendLog(tag + "!", ev.Data); };
+                process.Exited += (s, ev) => AppendLog("GUI", tag + " terminó.");
+                process.Start();
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+                return process;
             }
             catch (Exception ex)
             {
-                SetStatus("No pude iniciar Start-Netman.ps1: " + ex.Message, true);
+                AppendLog("GUI", "ERROR lanzando " + tag + ": " + ex.Message);
+                return null;
             }
+        }
+
+        /// <summary>Corre un proceso corto y espera a que termine (chequeo/instalación de Playwright).</summary>
+        private int RunBlocking(string fileName, string arguments, string workingDirectory, string tag, bool showLog)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = fileName,
+                    Arguments = arguments,
+                    WorkingDirectory = workingDirectory,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using (var p = new Process { StartInfo = psi })
+                {
+                    if (showLog)
+                    {
+                        p.OutputDataReceived += (s, ev) => { if (ev.Data != null) AppendLog(tag, ev.Data); };
+                        p.ErrorDataReceived += (s, ev) => { if (ev.Data != null) AppendLog(tag + "!", ev.Data); };
+                    }
+                    p.Start();
+                    if (showLog)
+                    {
+                        p.BeginOutputReadLine();
+                        p.BeginErrorReadLine();
+                    }
+                    p.WaitForExit();
+                    return p.ExitCode;
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog("GUI", "ERROR ejecutando " + fileName + " " + arguments + ": " + ex.Message);
+                return -1;
+            }
+        }
+
+        private void StopProcess(ref Process process, string tag)
+        {
+            if (process == null)
+            {
+                return;
+            }
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill();
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog("GUI", "No pude detener " + tag + ": " + ex.Message);
+            }
+            finally
+            {
+                try { process.Dispose(); } catch { }
+                process = null;
+            }
+        }
+
+        private void SetRunningState(bool running)
+        {
+            btnIniciar.Enabled = !running;
+            btnDetener.Enabled = running;
         }
 
         private static string Quote(string value)
         {
-            return "\"" + (value ?? string.Empty).Replace("\"", "`\"") + "\"";
+            return "\"" + (value ?? string.Empty).Replace("\"", "\\\"") + "\"";
         }
 
         private void SetStatus(string text, bool isError)
         {
             lblStatus.Text = text;
-            lblStatus.ForeColor = isError ? System.Drawing.Color.Firebrick : System.Drawing.Color.DimGray;
+            // Alto contraste: rojo fuerte para error, verde fuerte para OK/neutro.
+            lblStatus.ForeColor = isError ? System.Drawing.Color.DarkRed : System.Drawing.Color.DarkGreen;
+        }
+
+        private System.Windows.Forms.RichTextBox BoxForTag(string tag)
+        {
+            // "Browser" y "Browser!" van a su pestaña; GUI/Host/Host! a la otra.
+            return (tag != null && tag.StartsWith("Browser", StringComparison.Ordinal))
+                ? txtLogBrowser
+                : txtLogHost;
+        }
+
+        private void ClearLog()
+        {
+            if (tabsLogs.InvokeRequired)
+            {
+                tabsLogs.Invoke(new Action(ClearLog));
+                return;
+            }
+            txtLogHost.Clear();
+            txtLogBrowser.Clear();
+        }
+
+        private void AppendLog(string tag, string line)
+        {
+            var box = BoxForTag(tag);
+            if (box.InvokeRequired)
+            {
+                try { box.Invoke(new Action<string, string>(AppendLog), tag, line); } catch { }
+                return;
+            }
+            box.AppendText("[" + tag + "] " + line + Environment.NewLine);
+            box.SelectionStart = box.TextLength;
+            box.ScrollToCaret();
         }
     }
 }
