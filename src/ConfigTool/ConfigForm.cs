@@ -347,6 +347,7 @@ namespace NetmanConfigTool
             string hostArgs = "start --mode build-recycle -p " + Quote(cfg.LibreriaSipafProject)
                 + " --deploy-to " + Quote(deployTo)
                 + " --recycle-target " + Quote(recycleTarget)
+                + " --extensions \"*.vb,*.config\""
                 + " --web-watch " + Quote(cfg.SipafSitePath)
                 + " --site-url " + Quote(cfg.SiteBaseUrl);
 
