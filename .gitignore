@@ -58,3 +58,9 @@ exploration-hotreload.md
 
 # Scripts de prueba locales (contienen o probaban credenciales de dev)
 test-autologin-*.js
+
+# Node/Playwright: se instalan por máquina (npm install / npx playwright
+# install), no se commitean. Ídem la copia portable de Node que baja
+# NetmanConfigTool cuando no hay Node en el PATH del sistema.
+node_modules/
+tools/node-portable/

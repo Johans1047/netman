@@ -1,9 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
+using System.Linq;
 using System.Net;
 using System.Text;
 using System.Threading.Tasks;
+using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 namespace NetmanConfigTool
@@ -27,6 +31,14 @@ namespace NetmanConfigTool
 
         private Process _hostProcess;
         private Process _browserProcess;
+
+        /// <summary>
+        /// null => hay "node" en el PATH del sistema, se usa tal cual.
+        /// Si no, esta es la carpeta de una copia portable de Node (sin
+        /// instalador) que el propio GUI descargó -- ahí también viven
+        /// npm.cmd y npx.cmd, así que no hace falta nada más instalado.
+        /// </summary>
+        private string _nodeHome;
 
         public ConfigForm()
         {
@@ -319,6 +331,16 @@ namespace NetmanConfigTool
             await Task.Run(() => ProbeSite(cfg.SiteBaseUrl, out probeMessage));
             AppendLog("GUI", probeMessage);
 
+            // Node primero: si no está en el PATH, bajamos una copia portable
+            // (sin instalador, no toca el sistema) antes de arrancar nada.
+            bool nodeOk = await EnsureNodeAsync();
+            if (!nodeOk)
+            {
+                AppendLog("GUI", "ERROR: no pude conseguir Node. Revisá el log de arriba (¿hay salida a internet hacia nodejs.org?).");
+                SetRunningState(false);
+                return;
+            }
+
             string deployTo = Path.Combine(cfg.SipafSitePath, "Bin");
             string recycleTarget = Path.Combine(cfg.SipafSitePath, "web.config");
 
@@ -338,13 +360,15 @@ namespace NetmanConfigTool
 
             await Task.Delay(2000);
 
-            bool playwrightOk = await Task.Run(() => RunBlocking("node", "-e " + Quote("require.resolve('playwright')"), _netmanRoot, "node", false) == 0);
+            bool playwrightOk = await Task.Run(() => RunBlocking(NodeExePath(), "-e " + Quote("require.resolve('playwright')"), _netmanRoot, "node", false) == 0);
             if (!playwrightOk)
             {
                 AppendLog("GUI", "Playwright no está instalado todavía -- instalando (una sola vez, puede tardar)...");
+                string npmInvoke = _nodeHome == null ? "npm install playwright" : Quote(NpmCmdPath()) + " install playwright";
+                string npxInvoke = _nodeHome == null ? "npx playwright install chromium" : Quote(NpxCmdPath()) + " playwright install chromium";
                 bool installedOk = await Task.Run(() =>
-                    RunBlocking("cmd.exe", "/c npm install playwright", _netmanRoot, "npm", true) == 0
-                    && RunBlocking("cmd.exe", "/c npx playwright install chromium", _netmanRoot, "npx", true) == 0);
+                    RunBlocking("cmd.exe", "/c " + npmInvoke, _netmanRoot, "npm", true) == 0
+                    && RunBlocking("cmd.exe", "/c " + npxInvoke, _netmanRoot, "npx", true) == 0);
                 if (!installedOk)
                 {
                     AppendLog("GUI", "ERROR: no se pudo instalar Playwright. Revisá el log de arriba.");
@@ -354,7 +378,7 @@ namespace NetmanConfigTool
                 }
             }
 
-            _browserProcess = StartTrackedProcess("node", Quote(_browserJsPath), _netmanRoot, "Browser");
+            _browserProcess = StartTrackedProcess(NodeExePath(), Quote(_browserJsPath), _netmanRoot, "Browser");
             if (_browserProcess == null)
             {
                 SetRunningState(false);
@@ -364,6 +388,142 @@ namespace NetmanConfigTool
 
             AppendLog("GUI", "Navegador de hot-reload lanzado (PID " + _browserProcess.Id + "). Editá y mirá los logs de abajo.");
             SetStatus("Netman corriendo", false);
+        }
+
+        /// <summary>
+        /// Se fija si hay "node" en el PATH; si no, baja y descomprime una
+        /// copia portable oficial (sin instalador, no pide admin, no toca
+        /// el sistema) en netman\tools\node-portable\. La segunda vez que
+        /// se corre esto en la misma máquina no vuelve a descargar nada --
+        /// ya la encuentra ahí.
+        /// </summary>
+        private async Task<bool> EnsureNodeAsync()
+        {
+            if (RunBlocking("node", "--version", _netmanRoot, "node-check", false) == 0)
+            {
+                _nodeHome = null;
+                AppendLog("GUI", "Node encontrado en el PATH del sistema.");
+                return true;
+            }
+
+            string portableDir = Path.Combine(_netmanRoot, "tools", "node-portable");
+            if (File.Exists(Path.Combine(portableDir, "node.exe")))
+            {
+                _nodeHome = portableDir;
+                AppendLog("GUI", "Usando la copia portable de Node ya descargada en " + portableDir);
+                return true;
+            }
+
+            AppendLog("GUI", "No encontré Node en el PATH -- descargando una copia portable (una sola vez, sin instalador)...");
+            bool ok = await Task.Run(() => DownloadPortableNode(portableDir));
+            if (ok)
+            {
+                _nodeHome = portableDir;
+            }
+            return ok;
+        }
+
+        private bool DownloadPortableNode(string destDir)
+        {
+            string tempZip = null;
+            string extractRoot = null;
+            try
+            {
+                AppendLog("GUI", "Consultando la última versión LTS en nodejs.org...");
+                string indexJson;
+                using (var wc = new WebClient())
+                {
+                    wc.Headers.Add("User-Agent", "netman-config-tool");
+                    indexJson = wc.DownloadString("https://nodejs.org/dist/index.json");
+                }
+
+                var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+                var entries = serializer.Deserialize<List<Dictionary<string, object>>>(indexJson);
+
+                string version = null;
+                foreach (var entry in entries)
+                {
+                    object ltsVal;
+                    entry.TryGetValue("lts", out ltsVal);
+                    // El campo "lts" es `false` (bool) para versiones no-LTS,
+                    // o el nombre del release (string) para las que sí lo son.
+                    if (ltsVal is bool && !(bool)ltsVal)
+                    {
+                        continue;
+                    }
+
+                    object versionVal;
+                    entry.TryGetValue("version", out versionVal);
+                    version = versionVal as string;
+                    if (!string.IsNullOrEmpty(version))
+                    {
+                        break;
+                    }
+                }
+
+                if (string.IsNullOrEmpty(version))
+                {
+                    AppendLog("GUI", "No pude determinar la última versión LTS de Node en el índice de nodejs.org.");
+                    return false;
+                }
+
+                string zipName = "node-" + version + "-win-x64.zip";
+                string url = "https://nodejs.org/dist/" + version + "/" + zipName;
+                tempZip = Path.Combine(Path.GetTempPath(), zipName);
+
+                AppendLog("GUI", "Descargando Node " + version + " (portable, win-x64)...");
+                using (var wc = new WebClient())
+                {
+                    wc.Headers.Add("User-Agent", "netman-config-tool");
+                    wc.DownloadFile(url, tempZip);
+                }
+
+                AppendLog("GUI", "Descomprimiendo...");
+                extractRoot = Path.Combine(Path.GetTempPath(), "netman-node-extract-" + Guid.NewGuid().ToString("N"));
+                ZipFile.ExtractToDirectory(tempZip, extractRoot);
+
+                string innerFolder = Directory.GetDirectories(extractRoot).FirstOrDefault();
+                if (innerFolder == null)
+                {
+                    AppendLog("GUI", "El .zip descargado de Node no tiene la estructura esperada.");
+                    return false;
+                }
+
+                if (Directory.Exists(destDir))
+                {
+                    Directory.Delete(destDir, true);
+                }
+                Directory.CreateDirectory(Path.GetDirectoryName(destDir));
+                Directory.Move(innerFolder, destDir);
+
+                AppendLog("GUI", "Node " + version + " portable listo en " + destDir);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                AppendLog("GUI", "ERROR descargando Node portable: " + ex.Message);
+                return false;
+            }
+            finally
+            {
+                try { if (tempZip != null) File.Delete(tempZip); } catch { }
+                try { if (extractRoot != null) Directory.Delete(extractRoot, true); } catch { }
+            }
+        }
+
+        private string NodeExePath()
+        {
+            return _nodeHome == null ? "node" : Path.Combine(_nodeHome, "node.exe");
+        }
+
+        private string NpmCmdPath()
+        {
+            return _nodeHome == null ? "npm" : Path.Combine(_nodeHome, "npm.cmd");
+        }
+
+        private string NpxCmdPath()
+        {
+            return _nodeHome == null ? "npx" : Path.Combine(_nodeHome, "npx.cmd");
         }
 
         private void btnDetener_Click(object sender, EventArgs e)
