@@ -64,3 +64,6 @@ test-autologin-*.js
 # NetmanConfigTool cuando no hay Node en el PATH del sistema.
 node_modules/
 tools/node-portable/
+
+# Presentaciones/exportables locales, no son codigo
+Claude outputs/
