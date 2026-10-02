@@ -619,7 +619,13 @@ namespace NetmanConfigTool
             {
                 if (!process.HasExited)
                 {
-                    process.Kill();
+                    // process.Kill() solo mata ESTE PID, no es un "mata el
+                    // arbol". El Browser lanza Chrome via Playwright como
+                    // proceso hijo -- matar solo el node.exe lo deja huerfano,
+                    // vivo de fondo sin que el GUI se entere (asi se nos quedo
+                    // un Chrome corriendo horas con el Host ya muerto). Usar
+                    // taskkill /T mata el PID y todos sus descendientes de una.
+                    KillProcessTree(process.Id, tag);
                 }
             }
             catch (Exception ex)
@@ -630,6 +636,47 @@ namespace NetmanConfigTool
             {
                 try { process.Dispose(); } catch { }
                 process = null;
+            }
+        }
+
+        /// <summary>
+        /// Mata un proceso y todo su arbol de descendientes via
+        /// <c>taskkill /T /F</c>. Si taskkill mismo no se puede lanzar por
+        /// alguna razon, cae de vuelta a un Process.Kill() simple (mata solo
+        /// ese PID) -- mejor una limpieza parcial que ninguna.
+        /// </summary>
+        private void KillProcessTree(int pid, string tag)
+        {
+            try
+            {
+                using (var taskkill = new Process())
+                {
+                    taskkill.StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "taskkill",
+                        Arguments = "/PID " + pid + " /T /F",
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    taskkill.Start();
+                    taskkill.WaitForExit(5000);
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog("GUI", "taskkill fallo para " + tag + " (PID " + pid + "), probando Kill() simple: " + ex.Message);
+                try
+                {
+                    using (var p = Process.GetProcessById(pid))
+                    {
+                        if (!p.HasExited) p.Kill();
+                    }
+                }
+                catch
+                {
+                    // Ya habra muerto solo, o no se pudo de ninguna forma --
+                    // no hay mas nada razonable que intentar aca.
+                }
             }
         }
 
