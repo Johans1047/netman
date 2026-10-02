@@ -393,7 +393,7 @@ namespace HotReloadTool.Host
                 // and forcing a re-login. So we do NOT recycle here: we only bump a
                 // stamp file the browser polls to reload the current page in place.
                 SetState(ReloadState.Recycling);
-                BumpStamp("web-reload.stamp");
+                BumpWebStamp(changedPaths);
                 SetState(ReloadState.Idle);
                 PrintChangedPageUrls(changedPaths);
             }
@@ -424,6 +424,50 @@ namespace HotReloadTool.Host
             catch (Exception ex)
             {
                 Console.Error.WriteLine("WARNING: could not write stamp '" + fileName + "': " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Like <see cref="BumpStamp"/> for "web-reload.stamp", but also encodes
+        /// the direct URL of the page that actually changed on a second line.
+        /// Without this, the browser automation only knew a change happened and
+        /// reloaded whatever page it happened to be sitting on — fine when
+        /// that's the page you edited, but wrong for a two-page flow (page A
+        /// calls page B): editing B while parked on A just reloaded A, which
+        /// could kick off A's own Session-dependent redirects and land
+        /// somewhere unexpected instead of showing the edit. The browser side
+        /// now navigates straight to this URL when it's given and differs from
+        /// where it's currently parked.
+        /// Left blank (second line empty) when several distinct pages changed
+        /// in the same debounce window and we can't tell which one to show, or
+        /// when the path isn't under <see cref="ReloadConfiguration.WebWatchDirectory"/>/
+        /// <see cref="ReloadConfiguration.SiteBaseUrl"/> isn't configured — the
+        /// browser then falls back to its old "reload current page" behavior.
+        /// Never throws.
+        /// </summary>
+        private void BumpWebStamp(List<string> changedPaths)
+        {
+            string targetUrl = null;
+            if (changedPaths != null && changedPaths.Count > 0)
+            {
+                var urls = changedPaths
+                    .Select(BuildPageUrl)
+                    .Where(u => !string.IsNullOrEmpty(u))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (urls.Count == 1)
+                    targetUrl = urls[0];
+            }
+
+            try
+            {
+                string p = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "web-reload.stamp");
+                File.WriteAllText(p, DateTime.Now.ToString("o") + Environment.NewLine + (targetUrl ?? string.Empty));
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("WARNING: could not write stamp 'web-reload.stamp': " + ex.Message);
             }
         }
 
