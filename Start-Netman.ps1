@@ -55,13 +55,28 @@ param(
     [switch]$SkipSiteCheck,
 
     # Rutas de hoy -- ajustalas si tu entorno es distinto a este.
-    [string]$LibreriaSipafProject = 'C:\LibreriaSipaf\LibreriaSIPAF.vbproj',
-    [string]$SipafSitePath        = 'C:\Proyecto_VS2013\Sipaf',
+    [string]$LibreriaSipafProject = 'C:\Proyecto_VS2013\SIPAF\LibreriaSIPAF\LibreriaSIPAF.vbproj',
+    [string]$SipafSitePath        = 'C:\Proyecto_VS2013\SIPAF\SIPAF',
     [string]$SiteBaseUrl          = 'http://localhost:12345/SIPAF/'
 )
 
 $ErrorActionPreference = 'Stop'
 $netmanRoot = $PSScriptRoot
+
+# netman.config.json (el mismo que usa NetmanConfigTool) manda sobre los
+# defaults de arriba, salvo que pases el parametro a mano.
+$configPath = Join-Path $netmanRoot 'netman.config.json'
+if (Test-Path $configPath) {
+    try {
+        $cfg = Get-Content $configPath -Raw | ConvertFrom-Json
+        if (-not $PSBoundParameters.ContainsKey('LibreriaSipafProject') -and $cfg.LibreriaSipafProject) { $LibreriaSipafProject = $cfg.LibreriaSipafProject }
+        if (-not $PSBoundParameters.ContainsKey('SipafSitePath')        -and $cfg.SipafSitePath)        { $SipafSitePath        = $cfg.SipafSitePath }
+        if (-not $PSBoundParameters.ContainsKey('SiteBaseUrl')          -and $cfg.SiteBaseUrl)          { $SiteBaseUrl          = $cfg.SiteBaseUrl }
+        if ([string]::IsNullOrWhiteSpace($SipafUser) -and $cfg.SipafUser)                               { $SipafUser            = $cfg.SipafUser }
+    } catch {
+        Write-Warning "No pude leer $configPath ($($_.Exception.Message)). Uso los defaults del script."
+    }
+}
 $hostExe    = Join-Path $netmanRoot 'src\Host\bin\Debug\HotReloadTool.Host.exe'
 $browserJs  = Join-Path $netmanRoot 'netman-hotreload-browser.js'
 $deployTo   = Join-Path $SipafSitePath 'Bin'
