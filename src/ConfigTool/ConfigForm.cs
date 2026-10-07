@@ -119,10 +119,45 @@ namespace NetmanConfigTool
             }
         }
 
-        private void ConfigForm_FormClosing(object sender, FormClosingEventArgs e)
+        // Verdadero cuando ya detuvimos los procesos y el cierre es el definitivo.
+        private bool _closingAfterStop;
+
+        private async void ConfigForm_FormClosing(object sender, FormClosingEventArgs e)
         {
-            StopProcess(ref _browserProcess, "Browser");
-            StopProcess(ref _hostProcess, "Host");
+            if (_stopping && e.CloseReason == CloseReason.UserClosing)
+            {
+                // Ya estamos deteniendo (Detener o un cierre previo): no cerrar
+                // todavia o los hilos de fondo mueren a medio taskkill y dejan
+                // procesos huerfanos. Se cierra solo cuando termina.
+                e.Cancel = true;
+                return;
+            }
+
+            if (_closingAfterStop || (_hostProcess == null && _browserProcess == null))
+            {
+                return;
+            }
+
+            if (e.CloseReason != CloseReason.UserClosing)
+            {
+                // Apagado de Windows u otro cierre que no se puede cancelar ni
+                // esperar: limpieza sincrona y rapida (solo el Browser, que es
+                // el que tiene Chrome colgando, necesita matar el arbol).
+                StopProcess(ref _browserProcess, "Browser", true);
+                StopProcess(ref _hostProcess, "Host", false);
+                return;
+            }
+
+            // Cierre normal: NO bloquear el hilo de UI mientras taskkill mata el
+            // arbol de procesos (con Chrome de por medio puede tardar varios
+            // segundos y la ventana se quedaba "colgada"). Cancelamos este cierre,
+            // paramos todo en segundo plano y volvemos a cerrar cuando termine.
+            e.Cancel = true;
+            Enabled = false;
+            SetStatus("Deteniendo netman antes de cerrar...", false);
+            await StopAllAsync();
+            _closingAfterStop = true;
+            Close();
         }
 
         private void btnCerrar_Click(object sender, EventArgs e)
@@ -374,7 +409,7 @@ namespace NetmanConfigTool
                 {
                     AppendLog("GUI", "ERROR: no se pudo instalar Playwright. Revisá el log de arriba.");
                     SetRunningState(false);
-                    StopProcess(ref _hostProcess, "Host");
+                    StopProcess(ref _hostProcess, "Host", false);
                     return;
                 }
             }
@@ -383,7 +418,7 @@ namespace NetmanConfigTool
             if (_browserProcess == null)
             {
                 SetRunningState(false);
-                StopProcess(ref _hostProcess, "Host");
+                StopProcess(ref _hostProcess, "Host", false);
                 return;
             }
 
@@ -527,13 +562,72 @@ namespace NetmanConfigTool
             return _nodeHome == null ? "npx" : Path.Combine(_nodeHome, "npx.cmd");
         }
 
-        private void btnDetener_Click(object sender, EventArgs e)
+        private async void btnDetener_Click(object sender, EventArgs e)
         {
             AppendLog("GUI", "Deteniendo netman...");
-            StopProcess(ref _browserProcess, "Browser");
-            StopProcess(ref _hostProcess, "Host");
+            btnDetener.Enabled = false;
+            SetStatus("Deteniendo netman...", false);
+            // taskkill /T tarda (el Browser trae un arbol de Chrome): va en
+            // segundo plano para que la ventana siga respondiendo.
+            await StopAllAsync();
             SetRunningState(false);
             SetStatus("netman detenido.", false);
+        }
+
+        /// <summary>
+        /// Detiene Browser y Host sin bloquear el hilo de UI. Toma los procesos
+        /// y limpia los campos YA (en el hilo de UI), asi un segundo clic o el
+        /// cierre del formulario no intentan matarlos otra vez; los dos arboles
+        /// se matan en paralelo en hilos de fondo.
+        /// </summary>
+        private async Task StopAllAsync()
+        {
+            Process browser = _browserProcess;
+            Process host = _hostProcess;
+            _browserProcess = null;
+            _hostProcess = null;
+            _stopping = true;
+
+            try
+            {
+                var work = new List<Task>();
+                if (browser != null)
+                {
+                    work.Add(Task.Run(() => StopDetached(browser, "Browser")));
+                }
+                if (host != null)
+                {
+                    work.Add(Task.Run(() => StopDetached(host, "Host")));
+                }
+                await Task.WhenAll(work);
+            }
+            finally
+            {
+                _stopping = false;
+            }
+        }
+
+        // Verdadero mientras StopAllAsync esta matando procesos en segundo plano.
+        private bool _stopping;
+
+        /// <summary>Corre en un hilo de fondo: mata el arbol del proceso y lo libera.</summary>
+        private void StopDetached(Process process, string tag)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    KillProcessTree(process.Id, tag);
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog("GUI", "No pude detener " + tag + ": " + ex.Message);
+            }
+            finally
+            {
+                try { process.Dispose(); } catch { }
+            }
         }
 
         /// <summary>Lanza un proceso hijo con stdout/stderr redirigidos al panel de logs.</summary>
@@ -609,7 +703,17 @@ namespace NetmanConfigTool
             }
         }
 
-        private void StopProcess(ref Process process, string tag)
+        /// <summary>
+        /// Version SINCRONA (bloquea el hilo de UI): solo para rutas de error de
+        /// arranque y cierres que no se pueden esperar. Para el boton Detener y
+        /// el cierre normal usar <see cref="StopAllAsync"/>.
+        /// </summary>
+        /// <param name="killTree">
+        /// true = taskkill /T (mata tambien a los hijos, p.ej. el Chrome que
+        /// Playwright lanza desde el node.exe del Browser; tarda mas);
+        /// false = Process.Kill() rapido, solo ese PID.
+        /// </param>
+        private void StopProcess(ref Process process, string tag, bool killTree)
         {
             if (process == null)
             {
@@ -625,7 +729,14 @@ namespace NetmanConfigTool
                     // vivo de fondo sin que el GUI se entere (asi se nos quedo
                     // un Chrome corriendo horas con el Host ya muerto). Usar
                     // taskkill /T mata el PID y todos sus descendientes de una.
-                    KillProcessTree(process.Id, tag);
+                    if (killTree)
+                    {
+                        KillProcessTree(process.Id, tag);
+                    }
+                    else
+                    {
+                        process.Kill();
+                    }
                 }
             }
             catch (Exception ex)
