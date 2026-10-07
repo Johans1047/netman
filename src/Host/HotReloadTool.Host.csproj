@@ -50,6 +50,7 @@
     <Compile Include="CommandLineArgs.cs" />
     <Compile Include="MsBuildCompatibilityValidator.cs" />
     <Compile Include="ReloadOrchestrator.cs" />
+    <Compile Include="AutologinPageInstaller.cs" />
       <Compile Include="Properties\AssemblyInfo.cs" />
     </ItemGroup>
   <ItemGroup>
@@ -68,6 +69,11 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\site-files\_netman-autologin.html">
+      <LogicalName>_netman-autologin.html</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

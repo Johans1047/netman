@@ -31,12 +31,73 @@ const STAMP_DIR = path.join(__dirname, 'src', 'Host', 'bin', 'Debug');
 const WEB_STAMP = path.join(STAMP_DIR, 'web-reload.stamp');
 const RECYCLE_STAMP = path.join(STAMP_DIR, 'recycle.stamp');
 const CONTENT_FRAME_NAME = 'Contenido';
-// Por defecto Playwright guarda las descargas en una carpeta temporal propia
-// que no es accesible desde el Explorador -- si estas probando un boton de
-// "Descargar" dentro del Chrome de netman, el archivo "desaparecia". Fijando
-// downloadsPath, Chromium las guarda directo en tu carpeta de Descargas de
-// siempre, como cualquier otro navegador.
-const DOWNLOADS_DIR = path.join(require('os').homedir(), 'Downloads');
+// DESCARGAS. Playwright NO guarda las descargas como un Chrome normal: las deja
+// en una carpeta temporal con nombre GUID y las BORRA cuando se cierra el
+// contexto (esto aplica tambien con launch({ downloadsPath }) -- la doc oficial
+// lo dice: "the downloads are deleted when the browser context they were
+// created in is closed"). Por eso hay que copiar cada archivo con
+// download.saveAs() al destino real; ver hookDownloads() mas abajo.
+//
+// Destino, en orden de prioridad:
+//   1) variable de entorno NETMAN_DOWNLOADS_DIR (override explicito)
+//   2) la carpeta "Descargas" REAL de Windows (Known Folder), que puede estar
+//      redirigida a OneDrive o a la red -- no asumimos que es ~/Downloads
+//   3) ~/Downloads
+// Ojo: "Descargas" es solo el nombre localizado que muestra el Explorador; la
+// ruta fisica casi siempre se llama Downloads.
+function resolveDownloadsDir() {
+  const fromEnv = (process.env.NETMAN_DOWNLOADS_DIR || '').trim();
+  if (fromEnv) return fromEnv;
+
+  if (process.platform === 'win32') {
+    try {
+      const out = require('child_process').execFileSync(
+        'reg',
+        ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders',
+         '/v', '{374DE290-123F-4565-9164-39C4925E467B}'],
+        { encoding: 'utf8', timeout: 3000, windowsHide: true }
+      );
+      const m = /REG_(?:EXPAND_)?SZ\s+(.+?)\s*$/m.exec(out);
+      if (m) {
+        const expanded = m[1].replace(/%([^%]+)%/g, function (all, name) {
+          return process.env[name] !== undefined ? process.env[name] : all;
+        });
+        if (expanded && expanded.indexOf('%') === -1) return expanded;
+      }
+    } catch (e) { /* sin acceso al registro: caemos al default */ }
+  }
+  return path.join(require('os').homedir(), 'Downloads');
+}
+const DOWNLOADS_DIR = resolveDownloadsDir();
+
+// Nombre libre dentro de dir: "informe.pdf", "informe (1).pdf", ... para no
+// pisar descargas anteriores (el suggestedFilename puede traer caracteres
+// invalidos en Windows, los reemplazamos).
+function uniqueDownloadPath(dir, suggestedName) {
+  const safe = String(suggestedName || '').replace(/[\\/:*?"<>|]/g, '_').trim() || 'descarga';
+  const ext = path.extname(safe);
+  const base = path.basename(safe, ext);
+  let candidate = path.join(dir, safe);
+  for (let i = 1; fs.existsSync(candidate); i++) {
+    candidate = path.join(dir, base + ' (' + i + ')' + ext);
+  }
+  return candidate;
+}
+
+// Se engancha a CADA pagina del contexto (la principal y las pestañas/popups
+// que SIPAF abre con window.open, p.ej. el visor de reportes), porque el
+// evento 'download' es por pagina.
+function hookDownloads(p) {
+  p.on('download', async function (download) {
+    try {
+      const dest = uniqueDownloadPath(DOWNLOADS_DIR, download.suggestedFilename());
+      await download.saveAs(dest);
+      log('Descarga guardada: ' + dest);
+    } catch (err) {
+      log('No se pudo guardar la descarga: ' + err.message);
+    }
+  });
+}
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function mtime(p) { try { return fs.statSync(p).mtimeMs; } catch { return 0; } }
@@ -100,22 +161,31 @@ function currentWorkUrl(page) {
 // porque el login real nunca habia terminado de correr. Resultado: el error
 // "connectionString" de ArgumentException en la primera pagina que tocara
 // una clase de LibreriaSipaf.
+// Credenciales al helper SIN ponerlas en la URL (la URL queda en historial,
+// logs de IIS Express y Referer): se las dejamos en localStorage del origen
+// del helper antes de que cargue su script. Solo en esa pagina.
+async function sembrarCredencialesAutologin(context, user, pass) {
+  await context.addInitScript(function (cred) {
+    if (location.pathname.indexOf('_netman-autologin') === -1) return;
+    try { localStorage.setItem('netman.autologin', JSON.stringify({ user: cred.user, pass: cred.pass })); } catch (e) {}
+  }, { user: user, pass: pass });
+}
+
 async function attemptLogin(page) {
   if (!USER || !PASS) {
     throw new Error('Faltan NETMAN_SIPAF_USER / NETMAN_SIPAF_PASS en el entorno (no hardcodeamos credenciales por seguridad).');
   }
-  await page.goto(BASE + '/_netman-autologin.html');
-  await page.waitForSelector('#usuario', { timeout: 10000 });
-  await page.fill('#usuario', USER);
-  await page.fill('#clave', PASS);
-  // Forzar destino al menu para no heredar un target viejo de localStorage
-  await page.fill('#destino', BASE + '/wPerfiles.aspx');
-  await page.check('#recordar');
-  await page.click('#btnEntrar');
+  // _netman-autologin.html es un helper same-origin que hace GET a
+  // wInicio.aspx, copia __VIEWSTATE/__EVENTVALIDATION y hace el POST Web
+  // Forms por nosotros. Las credenciales NO van en la URL: se siembran en su
+  // localStorage con addInitScript (la URL queda en historial y logs).
+  await sembrarCredencialesAutologin(page.context(), USER, PASS);
+  var loginPage = BASE + '/_netman-autologin.html?to=' + encodeURIComponent(BASE + '/wPerfiles.aspx');
+  await page.goto(loginPage);
 
   // _netman-autologin.html ya distingue exito ("Login OK..." + redirige) de
   // fracaso (deja el status con clase "err" y NO redirige). Esperamos la
-  // primera señal real que aparezca, en vez de solo esperar el "exito" y
+  // primera senial real que aparezca, en vez de solo esperar el "exito" y
   // seguir igual si nunca llega.
   const outcome = await Promise.race([
     page.waitForFunction(
@@ -147,7 +217,7 @@ async function attemptLogin(page) {
 
   // Ni "ok" ni "err" llegaron en 15s: probablemente el AppDomain nuevo
   // todavia estaba inicializando. Tratarlo como fallo, no como exito mudo.
-  log('Login sin confirmar tras 15s (¿AppDomain todavia inicializando?).');
+  log('Login sin confirmar tras 15s (AppDomain todavia inicializando?).');
   return false;
 }
 
@@ -182,8 +252,15 @@ async function establishLogin(page) {
 (async () => {
   log('Iniciando Chrome visible...');
   try { fs.mkdirSync(DOWNLOADS_DIR, { recursive: true }); } catch {}
-  const browser = await chromium.launch({ headless: false, args: ['--start-maximized'], downloadsPath: DOWNLOADS_DIR });
+  log('Descargas -> ' + DOWNLOADS_DIR);
+  // OJO: sin downloadsPath a proposito. Con downloadsPath Playwright dejaria
+  // aca archivos con nombre GUID (que ademas borra al cerrar). Los archivos
+  // buenos los copia hookDownloads() con su nombre real.
+  const browser = await chromium.launch({ headless: false, args: ['--start-maximized'] });
   const context = await browser.newContext({ viewport: null, acceptDownloads: true });
+  // Registrado ANTES de newPage() para que tambien cubra la pagina principal
+  // y cualquier pestaña/popup que se abra despues.
+  context.on('page', hookDownloads);
   const page = await context.newPage();
   // Red de seguridad: si algun dialog nativo (confirm/alert/prompt) llegara
   // a aparecer igual -- por ejemplo un "Confirmar reenvio de formulario" que

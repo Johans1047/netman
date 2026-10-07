@@ -87,6 +87,23 @@ namespace HotReloadTool.Host
                     return 1;
                 }
 
+                // Plug-and-play: la pagina de autologin tiene que existir dentro del
+                // sitio vigilado; si falta (o cambio) la dejamos aca.
+                if (!string.IsNullOrWhiteSpace(config.WebWatchDirectory))
+                {
+                    try
+                    {
+                        bool written = AutologinPageInstaller.EnsureInstalled(config.WebWatchDirectory);
+                        Console.WriteLine(written
+                            ? "  Autologin: " + AutologinPageInstaller.FileName + " instalado en " + config.WebWatchDirectory
+                            : "  Autologin: " + AutologinPageInstaller.FileName + " al dia");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine("WARNING: no pude instalar " + AutologinPageInstaller.FileName + ": " + ex.Message);
+                    }
+                }
+
                 // MSBuild compatibility validation (Phase 1 task 1.7)
                 MsBuildCompatibilityValidator.ValidateRuntime();
 

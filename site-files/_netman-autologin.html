@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>netman - autologin SIPAF</title>
+<!--
+  Pagina de apoyo de netman (NO es parte de SIPAF). Hace el login de SIPAF por
+  fetch same-origin: baja wInicio.aspx, copia sus campos ocultos
+  (__VIEWSTATE, __EVENTVALIDATION, ...), manda usuario/clave y, si SIPAF
+  redirige a wPerfiles.aspx, navega al destino (?to=<url>).
+
+  Fuente de verdad: <repo netman>\site-files\_netman-autologin.html
+  netman la copia sola a la raiz del sitio Sipaf al arrancar. No la subas a TFVC.
+
+  Ids que usan netman-auto-login.js y netman-hotreload-browser.js:
+  #usuario #clave #recordar #destino #btnEntrar #status (class "err" = fallo)
+-->
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 2rem; max-width: 26rem; }
+  label { display: block; margin-top: .7rem; font-size: .9rem; }
+  input[type=text], input[type=password] { width: 100%; padding: .35rem; box-sizing: border-box; }
+  button { margin-top: 1rem; padding: .4rem 1rem; }
+  #status { margin-top: 1rem; min-height: 1.4rem; font-size: .9rem; }
+  #status.ok { color: #1a7f37; }
+  #status.err { color: #c00; }
+  small { color: #666; }
+</style>
+</head>
+<body>
+<h3>netman &middot; autologin SIPAF</h3>
+<form id="f" autocomplete="off">
+  <label>Usuario <input type="text" id="usuario" /></label>
+  <label>Clave <input type="password" id="clave" /></label>
+  <label>Destino <input type="text" id="destino" /></label>
+  <label><input type="checkbox" id="recordar" /> Recordar en este navegador
+    <small>(se guarda en localStorage de localhost)</small></label>
+  <button type="submit" id="btnEntrar">Entrar</button>
+</form>
+<div id="status"></div>
+
+<script>
+(function () {
+  var KEY = 'netman.autologin';
+  var $ = function (id) { return document.getElementById(id); };
+  var base = location.pathname.replace(/[^\/]*$/, '');          // /SIPAF/
+  var loginUrl = base + 'wInicio.aspx';
+  var defaultDest = base + 'wPerfiles.aspx';
+
+  function setStatus(text, cls) { var s = $('status'); s.textContent = text; s.className = cls || ''; }
+
+  function load() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { return {}; } }
+  function save(o) { try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) {} }
+  function clear() { try { localStorage.removeItem(KEY); } catch (e) {} }
+
+  // Solo destinos del mismo origen (evita usar esta pagina como redirect abierto).
+  function safeDest(raw) {
+    try {
+      var u = new URL(raw || defaultDest, location.href);
+      return u.origin === location.origin ? u.href : new URL(defaultDest, location.href).href;
+    } catch (e) { return new URL(defaultDest, location.href).href; }
+  }
+
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  async function fetchLoginPage() {
+    // Hasta 3 intentos: tras un reciclaje el sitio puede devolver 5xx/cortar
+    // la conexion mientras corre Application_Start.
+    var last;
+    for (var i = 0; i < 3; i++) {
+      try {
+        var r = await fetch(loginUrl, { credentials: 'same-origin', cache: 'no-store' });
+        if (r.ok) return await r.text();
+        last = new Error('HTTP ' + r.status + ' al pedir wInicio.aspx');
+      } catch (e) { last = e; }
+      await sleep(2000);
+    }
+    throw last;
+  }
+
+  function endsWith(s, suf) { return s && s.slice(-suf.length) === suf; }
+
+  async function doLogin(user, pass, dest) {
+    setStatus('Pidiendo wInicio.aspx ...');
+    var html = await fetchLoginPage();
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    var form = doc.querySelector('form');
+    if (!form) throw new Error('wInicio.aspx no tiene <form>.');
+
+    var body = new URLSearchParams();
+    var userName = null, passName = null, btnName = null;
+    Array.prototype.forEach.call(form.elements, function (el) {
+      var n = el.name; if (!n) return;
+      if (endsWith(n, '$txtUsuario') || n === 'txtUsuario') { userName = n; return; }
+      if (endsWith(n, '$txtPassword') || n === 'txtPassword') { passName = n; return; }
+      if (endsWith(n, '$btnEnviar') || n === 'btnEnviar') { btnName = n; return; }
+      var t = (el.type || '').toLowerCase();
+      if (t === 'submit' || t === 'button' || t === 'image' || t === 'reset' || t === 'file') return;
+      if ((t === 'checkbox' || t === 'radio') && !el.checked) return;
+      body.append(n, el.value || '');
+    });
+    if (!userName || !passName || !btnName)
+      throw new Error('No encontre txtUsuario/txtPassword/btnEnviar en wInicio.aspx (cambio el formulario?).');
+
+    body.set(userName, user);
+    body.set(passName, pass);
+    body.set(btnName, 'Enviar');
+
+    setStatus('Enviando credenciales ...');
+    var res = await fetch(loginUrl, {
+      method: 'POST', credentials: 'same-origin', redirect: 'follow',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    });
+    var text = await res.text();
+
+    // Exito = SIPAF redirige a wPerfiles.aspx (o a cambio de clave).
+    var finalUrl = (res.url || '').toLowerCase();
+    if (finalUrl.indexOf('wperfiles') !== -1) return true;
+    if (finalUrl.indexOf('wcambiarclave') !== -1)
+      throw new Error('SIPAF pide cambiar la clave (wCambiarClave.aspx). Cambiala a mano y reintenta.');
+
+    var msg = '';
+    try {
+      var d2 = new DOMParser().parseFromString(text, 'text/html');
+      var lbl = d2.querySelector('[id$="lblmsg"]');
+      msg = lbl ? (lbl.textContent || '').trim() : '';
+    } catch (e) {}
+    throw new Error('Login rechazado' + (msg ? ': ' + msg : ' (la respuesta no fue wPerfiles.aspx).'));
+  }
+
+  async function run(user, pass, dest, remember) {
+    $('btnEntrar').disabled = true;
+    try {
+      await doLogin(user, pass, dest);
+      if (remember) save({ user: user, pass: pass }); else clear();
+      setStatus('Login OK, redirigiendo ...', 'ok');
+      location.href = safeDest(dest);
+    } catch (e) {
+      setStatus('ERROR: ' + (e && e.message ? e.message : e), 'err');
+      $('btnEntrar').disabled = false;
+    }
+  }
+
+  var params = new URLSearchParams(location.search);
+  var to = params.get('to');
+  var saved = load();
+  $('destino').value = safeDest(to);
+  if (saved.user) { $('usuario').value = saved.user; $('recordar').checked = true; }
+
+  $('f').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var u = $('usuario').value.trim(), p = $('clave').value;
+    if (!u || !p) { setStatus('Falta usuario o clave.', 'err'); return; }
+    run(u, p, $('destino').value, $('recordar').checked);
+  });
+
+  // Con ?to= y credenciales recordadas: entra solo.
+  if (to && saved.user && saved.pass) run(saved.user, saved.pass, to, true);
+})();
+</script>
+</body>
+</html>

@@ -1,5 +1,11 @@
 // netman-auto-login.js - Helper reutilizable para auto-login en SIPAF
 // Uso: node netman-auto-login.js [--url <target>] [--user <usuario>] [--pass <clave>]
+//
+// Estrategia: navega a _netman-autologin.html (mismo origin que SIPAF) con las
+// credenciales en querystring. Ese HTML hace GET a wInicio.aspx, parsea los
+// campos Web Forms (__VIEWSTATE, __EVENTVALIDATION, ...) y hace POST con
+// ctl00$cphSipaf$txtUsuario / ctl00$cphSipaf$txtPassword. ASP.NET Forms Auth
+// responde con 302 y la cookie queda seteada.
 const { chromium } = require('playwright');
 
 const BASE = 'http://localhost:12345/SIPAF';
@@ -15,13 +21,23 @@ function getArg(flag) {
   return i !== -1 ? process.argv[i + 1] : null;
 }
 
+// Credenciales al helper SIN ponerlas en la URL (la URL queda en historial,
+// logs de IIS Express y Referer): se las dejamos en localStorage del origen
+// del helper antes de que cargue su script. Solo en esa pagina.
+async function sembrarCredencialesAutologin(context, user, pass) {
+  await context.addInitScript(function (cred) {
+    if (location.pathname.indexOf('_netman-autologin') === -1) return;
+    try { localStorage.setItem('netman.autologin', JSON.stringify({ user: cred.user, pass: cred.pass })); } catch (e) {}
+  }, { user: user, pass: pass });
+}
+
 (async () => {
   const target = getArg('--url') || `${BASE}/wPerfiles.aspx`;
   const user = getArg('--user') || DEFAULT_USER;
   const pass = getArg('--pass') || DEFAULT_PASS;
 
-  if (!pass) {
-    console.error('[netman-login] Falta la clave: pasá --pass <clave> o seteá NETMAN_SIPAF_PASS.');
+  if (!user || !pass) {
+    console.error('[netman-login] Faltan credenciales: pasá --user/--pass o seteá NETMAN_SIPAF_USER/PASS.');
     process.exit(1);
   }
 
@@ -29,30 +45,33 @@ function getArg(flag) {
   const context = await browser.newContext();
   const page = await context.newPage();
 
-  // Paso 1: guardar credenciales (primera vez)
-  console.log(`[netman-login] Configurando credenciales para ${user}...`);
-  await page.goto(`${BASE}/_netman-autologin.html`);
-  await page.fill('#usuario', user);
-  await page.fill('#clave', pass);
-  await page.check('#recordar');
-  await page.click('#btnEntrar');
-  await page.waitForTimeout(1500);
+  // El HTML helper entra solo si encuentra credenciales en su localStorage;
+  // las sembramos con addInitScript (nunca en la URL).
+  await sembrarCredencialesAutologin(context, user, pass);
+  const loginUrl = `${BASE}/_netman-autologin.html?to=${encodeURIComponent(target)}`;
 
-  // Paso 2: navegar al destino via autologin
-  console.log(`[netman-login] Navegando a ${target}...`);
-  await page.goto(`${BASE}/_netman-autologin.html?to=${encodeURIComponent(target)}`);
+  console.log(`[netman-login] Ejecutando auto-login...`);
+  await page.goto(loginUrl);
 
-  // Esperar que salga del login
+  // Esperar a que salga del autologin (redirige al destino tras login OK)
   await page.waitForFunction(
     () => !window.location.href.includes('_netman-autologin'),
-    { timeout: 10000 }
+    { timeout: 15000 }
   ).catch(() => {});
 
   const finalUrl = page.url();
-  console.log(`[netman-login] OK → ${finalUrl}`);
+  const ok = !finalUrl.includes('_netman-autologin');
+
+  if (ok) {
+    console.log(`[netman-login] OK → ${finalUrl}`);
+  } else {
+    // Leer el mensaje de error que dejó el status div
+    const errMsg = await page.$eval('#status', el => el.textContent).catch(() => '(sin detalle)');
+    console.error(`[netman-login] FALLÓ: ${errMsg}`);
+  }
 
   await browser.close();
-  return finalUrl;
+  process.exit(ok ? 0 : 1);
 })().catch(err => {
   console.error('[netman-login] ERROR:', err.message);
   process.exit(1);
