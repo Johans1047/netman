@@ -249,6 +249,54 @@ async function establishLogin(page) {
   throw new Error('No se pudo re-loguear tras ' + MAX_INTENTOS + ' intentos. Revisá el sitio a mano antes de seguir editando.');
 }
 
+// EXTENSIONES DE CHROME (config SOLO local). Playwright no puede instalar nada
+// desde la Chrome Web Store: hay que bajar la carpeta de la extension a mano y
+// apuntarla con --load-extension. Y solo funciona sobre un contexto
+// persistente (launchPersistentContext) -- chromium.launch() normal no lo
+// soporta de forma util, porque el profile se tira al cerrar.
+//
+// Se declara en netman.extensions.json, un archivo aparte de
+// netman.config.json y tambien en .gitignore (config local de cada maquina,
+// nunca se commitea):
+//   { "Extensions": [ "C:\\ruta\\a\\mi-extension" ] }
+// Va aparte A PROPOSITO: netman.config.json lo reescribe el ConfigTool desde
+// su propio modelo, que ignora toda clave que el no conoce -- si pusieramos
+// "Extensions" ahi, desapareceria cada vez que alguien apreta Guardar.
+// Sin ese campo, o si el archivo no existe, arranca EXACTAMENTE igual que
+// antes (launch + newContext): cero cambio para quien no lo use.
+function loadLocalExtensions() {
+  try {
+    const cfgPath = path.join(__dirname, 'netman.extensions.json');
+    if (!fs.existsSync(cfgPath)) return [];
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    const list = Array.isArray(cfg.Extensions) ? cfg.Extensions : [];
+    // Las rutas relativas se resuelven contra la carpeta del config, NO contra
+    // el cwd -- este script lo lanzan el .ps1, el ConfigTool y VS, cada uno con
+    // un cwd distinto, y ahi una relativa pasaria a ser impredecible.
+    const cfgDir = path.dirname(cfgPath);
+    const found = [];
+    for (const raw of list) {
+      // Ojo: path.resolve('') devuelve el cwd, no una cadena vacia -- hay que
+      // filtrar ANTES de resolver, si no una entrada "" o null se colaria como
+      // si fuera una extension valida.
+      const rel = String(raw == null ? '' : raw).trim();
+      if (!rel) continue;
+      const p = path.resolve(cfgDir, rel);
+      if (fs.existsSync(p)) found.push(p);
+      else log('AVISO: no existe la carpeta de la extension, la salteo: ' + p);
+    }
+    return found;
+  } catch (err) {
+    log('AVISO: no pude leer Extensions de netman.extensions.json: ' + err.message);
+    return [];
+  }
+}
+
+// Profile del contexto persistente. Fuera del repo y fuera de %TEMP% (Windows
+// lo limpia y perdes la sesion de la extension entre corridas).
+const BROWSER_PROFILE_DIR = process.env.NETMAN_BROWSER_PROFILE
+  || path.join(process.env.LOCALAPPDATA || require('os').homedir(), 'netman', 'browser-profile');
+
 (async () => {
   log('Iniciando Chrome visible...');
   try { fs.mkdirSync(DOWNLOADS_DIR, { recursive: true }); } catch {}
@@ -256,12 +304,41 @@ async function establishLogin(page) {
   // OJO: sin downloadsPath a proposito. Con downloadsPath Playwright dejaria
   // aca archivos con nombre GUID (que ademas borra al cerrar). Los archivos
   // buenos los copia hookDownloads() con su nombre real.
-  const browser = await chromium.launch({ headless: false, args: ['--start-maximized'] });
-  const context = await browser.newContext({ viewport: null, acceptDownloads: true });
+  const extensions = loadLocalExtensions();
+  let context;
+  if (extensions.length > 0) {
+    try { fs.mkdirSync(BROWSER_PROFILE_DIR, { recursive: true }); } catch {}
+    // Las dos cosas van SIEMPRE en un solo flag con las rutas separadas por
+    // coma. Chromium sobreescribe los switches repetidos, asi que un
+    // --load-extension por extension terminaria cargando solo la ultima
+    // (medido: repetido con 2 ext -> 1 worker; comma-joined -> 2 workers).
+    // --disable-extensions-except es obligatorio junto a --load-extension:
+    // sin el primero Chromium ignora el segundo.
+    const args = [
+      '--start-maximized',
+      '--disable-extensions-except=' + extensions.join(','),
+      '--load-extension=' + extensions.join(','),
+    ];
+    log('Extensiones: ' + extensions.length + ' | profile: ' + BROWSER_PROFILE_DIR);
+    context = await chromium.launchPersistentContext(BROWSER_PROFILE_DIR, {
+      headless: false,      // las extensiones NO corren en headless
+      viewport: null,
+      acceptDownloads: true,
+      args: args,
+    });
+  } else {
+    const browser = await chromium.launch({ headless: false, args: ['--start-maximized'] });
+    context = await browser.newContext({ viewport: null, acceptDownloads: true });
+  }
   // Registrado ANTES de newPage() para que tambien cubra la pagina principal
   // y cualquier pestaña/popup que se abra despues.
   context.on('page', hookDownloads);
-  const page = await context.newPage();
+  // launch() normal no tiene ninguna pestaña todavia; el contexto persistente
+  // ya arranca con una (la ultima sesion o about:blank). Reusamos la que haya
+  // para no dejar una pestaña huerfana, y enganchamos descargas tambien en la
+  // que ya existe -- el listener de 'page' de arriba solo cubre las futuras.
+  for (const existing of context.pages()) hookDownloads(existing);
+  const page = context.pages()[0] || await context.newPage();
   // Red de seguridad: si algun dialog nativo (confirm/alert/prompt) llegara
   // a aparecer igual -- por ejemplo un "Confirmar reenvio de formulario" que
   // el fix de frame.goto no cubra por algun camino no previsto -- aceptarlo

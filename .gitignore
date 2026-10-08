@@ -9,6 +9,9 @@ obj/
 # Config local de netman (rutas/usuario de la maquina de cada uno; la clave
 # nunca vive aca, va a Windows Credential Manager). No commitear.
 netman.config.json
+# Extensiones de Chrome locales (solo las lee netman-hotreload-browser.js; la
+# carpeta de la extension nunca se commitea). No commitear.
+netman.extensions.json
 
 # Visual Studio
 .vs/
