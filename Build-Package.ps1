@@ -79,9 +79,24 @@ if (-not (Test-Path $nuget)) {
         Invoke-WebRequest -Uri 'https://dist.nuget.org/win-x86-commandline/latest/nuget.exe' -OutFile $nuget -UseBasicParsing
     }
 }
-Write-Step 'Restaurando paquetes NuGet...'
-& $nuget restore (Join-Path $root 'HotReloadTool.sln') | Out-Host
-if ($LASTEXITCODE -ne 0) { throw 'nuget restore fallo.' }
+# Solo se restauran los packages.config de Host y Worker (lo unico que usa el
+# paquete). NO se restaura la .sln completa: los proyectos de pruebas pueden
+# usar PackageReference, que el MSBuild 12 de VS2013 no entiende.
+$newtonsoft = Join-Path $root 'packages\Newtonsoft.Json.9.0.1\lib\net45\Newtonsoft.Json.dll'
+if (Test-Path $newtonsoft) {
+    Write-Step 'Paquetes NuGet ya restaurados (Newtonsoft.Json 9.0.1).'
+} else {
+    Write-Step 'Restaurando paquetes NuGet...'
+    foreach ($cfg in @('src\Host\packages.config', 'src\Worker\packages.config')) {
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'   # nuget escribe a stderr aunque no falle
+        & $nuget restore (Join-Path $root $cfg) -SolutionDirectory $root 2>&1 | Out-Host
+        $code = $LASTEXITCODE
+        $ErrorActionPreference = $prev
+        if ($code -ne 0) { throw "nuget restore fallo para $cfg." }
+    }
+    if (-not (Test-Path $newtonsoft)) { throw 'Despues del restore sigue sin estar Newtonsoft.Json.' }
+}
 
 # --- Compilar ------------------------------------------------------------------
 foreach ($proj in @('src\Host\HotReloadTool.Host.csproj', 'src\ConfigTool\NetmanConfigTool.csproj')) {
@@ -133,10 +148,27 @@ if ($Portable) {
     }
     $tools = Join-Path $stage 'tools'
     New-Item -ItemType Directory -Path $tools -Force | Out-Null
-    Expand-Archive -Path $zipPath -DestinationPath $tools -Force
+    # Se extrae con .NET (Expand-Archive de PowerShell 5.1 es lento y se corta
+    # con zips grandes como el de Node). Si el zip bajado quedo incompleto o
+    # corrupto, se borra y se baja de nuevo UNA vez.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
     $extracted = Join-Path $tools "node-$NodeVersion-win-x64"
-    Rename-Item $extracted 'node-portable'
     $nodeHome = Join-Path $tools 'node-portable'
+    for ($try = 1; $try -le 2; $try++) {
+        try {
+            if (Test-Path $extracted) { Remove-Item $extracted -Recurse -Force }
+            if (Test-Path $nodeHome)  { Remove-Item $nodeHome -Recurse -Force }
+            [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $tools)
+            if (-not (Test-Path (Join-Path $extracted 'npm.cmd'))) { throw 'El zip de Node quedo incompleto (falta npm.cmd).' }
+            break
+        } catch {
+            Write-Warning "Extraccion de Node fallo (intento $try): $($_.Exception.Message)"
+            if ($try -eq 2) { throw }
+            Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+            Invoke-WebRequest -Uri "https://nodejs.org/dist/$NodeVersion/$zipName" -OutFile $zipPath -UseBasicParsing
+        }
+    }
+    Move-Item $extracted $nodeHome
 
     Write-Step 'Instalando Playwright dentro del paquete (npm install)...'
     Push-Location $stage
