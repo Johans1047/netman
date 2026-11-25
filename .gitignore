@@ -70,3 +70,6 @@ tools/node-portable/
 
 # Presentaciones/exportables locales, no son codigo
 Claude outputs/
+
+# Archivos sacados del repo, pendientes de borrar a mano
+_to_delete/

@@ -41,10 +41,10 @@ $req.GetResponse().StatusCode   # => OK (200)
 **Alternativa (CLI):** dos ventanas:
 ```batch
 :: Terminal 1: watcher (detecta cambios, compila, deploya, recicla)
-C:\Users\jonathan.salazar1\Tools\netman\bin\netman-sipaf.cmd
+<carpeta-de-netman>\bin\netman-sipaf.cmd
 
 :: Terminal 2: navegador con auto-login y recarga del iframe Contenido
-cd C:\Users\jonathan.salazar1\Tools\netman
+cd <carpeta-de-netman>
 node netman-hotreload-browser.js
 ```
 Las credenciales se leen de `NETMAN_SIPAF_USER` / `NETMAN_SIPAF_PASS` (el GUI las guarda en Windows

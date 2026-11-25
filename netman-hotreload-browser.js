@@ -1,4 +1,4 @@
-﻿// netman-hotreload-browser.js
+// netman-hotreload-browser.js
 // Flujo automatico: editas -> netman avisa -> el browser reacciona.
 //   - Cambio de .aspx/.aspx.vb (web-reload.stamp): recarga la MISMA pagina
 //     (la sesion sigue viva, no hace falta relogin).
@@ -20,7 +20,9 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const BASE = 'http://localhost:12345/SIPAF';
+const { siteBaseUrl } = require('./netman-config');
+// URL base del sitio: NETMAN_SITE_URL > SiteBaseUrl de netman.config.json > default.
+const BASE = siteBaseUrl();
 // Credenciales de desarrollo: preferí variables de entorno en vez de
 // hardcodearlas acá (este repo tiene .git — no las commitees en texto plano).
 //   set NETMAN_SIPAF_USER=<tu-usuario-sipaf>
@@ -345,12 +347,23 @@ const BROWSER_CHANNEL = process.env.NETMAN_BROWSER_CHANNEL || 'msedge';
   // que ya existe -- el listener de 'page' de arriba solo cubre las futuras.
   for (const existing of context.pages()) hookDownloads(existing);
   const page = context.pages()[0] || await context.newPage();
-  // Red de seguridad: si algun dialog nativo (confirm/alert/prompt) llegara
-  // a aparecer igual -- por ejemplo un "Confirmar reenvio de formulario" que
-  // el fix de frame.goto no cubra por algun camino no previsto -- aceptarlo
-  // en vez de dejar que Playwright lo cancele solo (su default), que es lo
-  // que dejaba la pagina "trabada" en el contenido viejo hasta un F5 manual.
-  page.on('dialog', dialog => dialog.accept().catch(() => {}));
+  // Dialogs nativos (alert/confirm/prompt/beforeunload). Playwright, si hay un
+  // listener registrado, espera que alguien los resuelva. Politica por defecto
+  // ("safe"): alert y beforeunload se aceptan (son informativos y sin ellos la
+  // pagina queda trabada en el contenido viejo hasta un F5); confirm y prompt
+  // se CANCELAN y se loguea el texto, para no aprobar sin querer una
+  // confirmacion de borrado/guardado. NETMAN_DIALOGS=accept devuelve el
+  // comportamiento anterior (aceptar todo).
+  const DIALOG_POLICY = (process.env.NETMAN_DIALOGS || 'safe').toLowerCase();
+  page.on('dialog', async dialog => {
+    const type = dialog.type();
+    const informativo = type === 'alert' || type === 'beforeunload';
+    const aceptar = DIALOG_POLICY === 'accept' || informativo;
+    if (!informativo) {
+      log('Dialogo ' + type + ' ' + (aceptar ? 'aceptado' : 'CANCELADO (NETMAN_DIALOGS=accept para aceptarlos)') + ': ' + dialog.message());
+    }
+    try { await (aceptar ? dialog.accept() : dialog.dismiss()); } catch (e) {}
+  });
 
   log('Estableciendo sesion inicial...');
   await establishLogin(page);

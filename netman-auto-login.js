@@ -8,7 +8,8 @@
 // responde con 302 y la cookie queda seteada.
 const { chromium } = require('playwright');
 
-const BASE = 'http://localhost:12345/SIPAF';
+const { siteBaseUrl } = require('./netman-config');
+const BASE = siteBaseUrl();
 // Credenciales de desarrollo por variable de entorno — este repo tiene .git,
 // no hardcodees la clave acá.
 //   set NETMAN_SIPAF_USER=<tu-usuario-sipaf>
