@@ -401,10 +401,9 @@ namespace NetmanConfigTool
             {
                 AppendLog("GUI", "Playwright no está instalado todavía -- instalando (una sola vez, puede tardar)...");
                 string npmInvoke = _nodeHome == null ? "npm install playwright" : Quote(NpmCmdPath()) + " install playwright";
-                string npxInvoke = _nodeHome == null ? "npx playwright install chromium" : Quote(NpxCmdPath()) + " playwright install chromium";
+                // Sin 'playwright install chromium': se usa el Edge instalado (channel msedge).
                 bool installedOk = await Task.Run(() =>
-                    RunBlocking("cmd.exe", "/c " + npmInvoke, _netmanRoot, "npm", true) == 0
-                    && RunBlocking("cmd.exe", "/c " + npxInvoke, _netmanRoot, "npx", true) == 0);
+                    RunBlocking("cmd.exe", "/c " + npmInvoke, _netmanRoot, "npm", true) == 0);
                 if (!installedOk)
                 {
                     AppendLog("GUI", "ERROR: no se pudo instalar Playwright. Revisá el log de arriba.");

@@ -219,8 +219,7 @@ try {
         Write-Host "    Playwright no esta instalado en $netmanRoot todavia -- instalando (una sola vez)..." -ForegroundColor Yellow
         npm install playwright
         if ($LASTEXITCODE -ne 0) { throw "npm install playwright fallo." }
-        npx playwright install chromium
-        if ($LASTEXITCODE -ne 0) { throw "playwright install chromium fallo." }
+        # Sin 'playwright install chromium': se usa el Edge instalado (channel msedge).
     }
 } finally {
     Pop-Location

@@ -1,4 +1,4 @@
-// netman-hotreload-browser.js
+﻿// netman-hotreload-browser.js
 // Flujo automatico: editas -> netman avisa -> el browser reacciona.
 //   - Cambio de .aspx/.aspx.vb (web-reload.stamp): recarga la MISMA pagina
 //     (la sesion sigue viva, no hace falta relogin).
@@ -268,7 +268,8 @@ function loadLocalExtensions() {
   try {
     const cfgPath = path.join(__dirname, 'netman.extensions.json');
     if (!fs.existsSync(cfgPath)) return [];
-    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    // replace(/^\uFEFF/): PowerShell/Notepad guardan UTF-8 con BOM y JSON.parse no lo traga.
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8').replace(/^\uFEFF/, ''));
     const list = Array.isArray(cfg.Extensions) ? cfg.Extensions : [];
     // Las rutas relativas se resuelven contra la carpeta del config, NO contra
     // el cwd -- este script lo lanzan el .ps1, el ConfigTool y VS, cada uno con
@@ -297,8 +298,12 @@ function loadLocalExtensions() {
 const BROWSER_PROFILE_DIR = process.env.NETMAN_BROWSER_PROFILE
   || path.join(process.env.LOCALAPPDATA || require('os').homedir(), 'netman', 'browser-profile');
 
+// Usa el Edge/Chrome ya instalado (no descarga el Chromium de Playwright, que
+// la red puede bloquear). NETMAN_BROWSER_CHANNEL=chrome para usar Chrome.
+const BROWSER_CHANNEL = process.env.NETMAN_BROWSER_CHANNEL || 'msedge';
+
 (async () => {
-  log('Iniciando Chrome visible...');
+  log('Iniciando ' + BROWSER_CHANNEL + ' visible...');
   try { fs.mkdirSync(DOWNLOADS_DIR, { recursive: true }); } catch {}
   log('Descargas -> ' + DOWNLOADS_DIR);
   // OJO: sin downloadsPath a proposito. Con downloadsPath Playwright dejaria
@@ -321,13 +326,14 @@ const BROWSER_PROFILE_DIR = process.env.NETMAN_BROWSER_PROFILE
     ];
     log('Extensiones: ' + extensions.length + ' | profile: ' + BROWSER_PROFILE_DIR);
     context = await chromium.launchPersistentContext(BROWSER_PROFILE_DIR, {
+      channel: BROWSER_CHANNEL,
       headless: false,      // las extensiones NO corren en headless
       viewport: null,
       acceptDownloads: true,
       args: args,
     });
   } else {
-    const browser = await chromium.launch({ headless: false, args: ['--start-maximized'] });
+    const browser = await chromium.launch({ channel: BROWSER_CHANNEL, headless: false, args: ['--start-maximized'] });
     context = await browser.newContext({ viewport: null, acceptDownloads: true });
   }
   // Registrado ANTES de newPage() para que tambien cubra la pagina principal

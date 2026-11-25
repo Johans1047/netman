@@ -41,7 +41,7 @@ async function sembrarCredencialesAutologin(context, user, pass) {
     process.exit(1);
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ channel: process.env.NETMAN_BROWSER_CHANNEL || 'msedge', headless: true });
   const context = await browser.newContext();
   const page = await context.newPage();
 
