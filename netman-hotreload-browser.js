@@ -164,6 +164,20 @@ function findFrameByUrl(page, targetUrl, excludeFrame) {
   return page.frames().find(f => f !== page.mainFrame() && f !== excludeFrame && urlKey(f.url()) === key) || null;
 }
 
+// Ventanas emergentes (window.open) y pestañas nuevas: cualquier pagina del
+// contexto que no sea la principal. Playwright las ve como Page propias; el
+// frame "Contenido" solo existe en la principal.
+function popupPages(context, page) {
+  return context.pages().filter(p => p !== page && !p.isClosed());
+}
+
+// Frame (el principal de la ventana o uno interno) de `p` con la pagina editada.
+function findFrameInPage(p, targetUrl) {
+  const key = urlKey(targetUrl);
+  if (!key) return null;
+  return p.frames().find(f => urlKey(f.url()) === key) || null;
+}
+
 // URL "real" en la que esta trabajando el usuario: la del iframe de
 // contenido si existe, si no la de la pagina top-level.
 function currentWorkUrl(page) {
@@ -426,6 +440,22 @@ const BROWSER_CHANNEL = process.env.NETMAN_BROWSER_CHANNEL || 'msedge';
       if (isAuthPage(workPage)) continue;   // si estamos en login, no tocar
 
       const stampTarget = readStampTargetUrl(WEB_STAMP);
+
+      // Ventana emergente con la pagina editada: se recarga SOLO esa (si no, el
+      // codigo de abajo navegaria "Contenido" a una pagina que el usuario tiene
+      // abierta en otra ventana y le taparia lo que estaba haciendo).
+      if (stampTarget) {
+        let handledInPopup = false;
+        for (const popup of popupPages(context, page)) {
+          const pf = findFrameInPage(popup, stampTarget);
+          if (!pf) continue;
+          log('Cambio web. La pagina editada esta en una ventana emergente -- recargando: ' + pf.url());
+          await pf.goto(pf.url(), { waitUntil: 'domcontentloaded' }).catch(() => {});
+          handledInPopup = true;
+        }
+        if (handledInPopup) continue;
+      }
+
       const frame = getContentFrame(page);
 
       if (frame) {
@@ -495,6 +525,15 @@ const BROWSER_CHANNEL = process.env.NETMAN_BROWSER_CHANNEL || 'msedge';
           await page.goto(target, { waitUntil: 'domcontentloaded' }).catch(() => {});
         }
         log('Recargada: ' + page.url());
+      }
+
+      // Cambio sin pagina concreta (.ascx, .master, .js, .css o varias paginas):
+      // puede afectar tambien a lo que haya en ventanas emergentes abiertas.
+      if (!stampTarget) {
+        for (const popup of popupPages(context, page)) {
+          log('Cambio web. Recargando ventana emergente: ' + popup.url());
+          await popup.goto(popup.url(), { waitUntil: 'domcontentloaded' }).catch(() => {});
+        }
       }
     }
   }
