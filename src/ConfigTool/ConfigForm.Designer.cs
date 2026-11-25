@@ -13,6 +13,8 @@ namespace NetmanConfigTool
             base.Dispose(disposing);
         }
 
+        private System.Windows.Forms.Panel pnlHeader;
+        private BoltLogo logo;
         private System.Windows.Forms.Label lblTitle;
         private System.Windows.Forms.Label lblHint;
         private System.Windows.Forms.Label lblUser;
@@ -46,6 +48,8 @@ namespace NetmanConfigTool
         private void InitializeComponent()
         {
             this.components = new System.ComponentModel.Container();
+            this.pnlHeader = new System.Windows.Forms.Panel();
+            this.logo = new BoltLogo();
             this.lblTitle = new System.Windows.Forms.Label();
             this.lblHint = new System.Windows.Forms.Label();
             this.lblUser = new System.Windows.Forms.Label();
@@ -80,18 +84,37 @@ namespace NetmanConfigTool
             const int left = 16;
             const int fieldWidth = 490;
             const int rowH = 48;
-            int y = 44;
+            const int headerH = 52;
+            int y = headerH + 12;
+
+            // pnlHeader -- franja con los colores del ícono (azul petróleo + rayo blanco).
+            // Sigue el ancho de la ventana (Anchor); logo y título los centra
+            // ApplyResponsiveLayout junto con el resto del bloque.
+            this.pnlHeader.BackColor = Brand;
+            this.pnlHeader.Location = new System.Drawing.Point(0, 0);
+            this.pnlHeader.Size = new System.Drawing.Size(left * 2 + fieldWidth, headerH);
+            this.pnlHeader.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left
+                | System.Windows.Forms.AnchorStyles.Right;
+            this.pnlHeader.Paint += new System.Windows.Forms.PaintEventHandler(this.pnlHeader_Paint);
+            this.pnlHeader.Controls.Add(this.logo);
+            this.pnlHeader.Controls.Add(this.lblTitle);
+
+            // logo
+            this.logo.Location = new System.Drawing.Point(left, 10);
+            this.logo.Size = new System.Drawing.Size(32, 32);
 
             // lblTitle
             this.lblTitle.AutoSize = true;
-            this.lblTitle.Font = new System.Drawing.Font("Segoe UI", 12F, System.Drawing.FontStyle.Bold);
-            this.lblTitle.Location = new System.Drawing.Point(left, 12);
+            this.lblTitle.BackColor = System.Drawing.Color.Transparent;
+            this.lblTitle.ForeColor = System.Drawing.Color.White;
+            this.lblTitle.Font = new System.Drawing.Font("Segoe UI", 13F, System.Drawing.FontStyle.Bold);
+            this.lblTitle.Location = new System.Drawing.Point(left + 42, 12);
             this.lblTitle.Text = "netman — configuración (v0.5)";
 
             // lblHint -- pedido explicito: dejar claro que hay que correr con Ctrl+F5
             this.lblHint.AutoSize = false;
             this.lblHint.Font = new System.Drawing.Font("Segoe UI", 8F, System.Drawing.FontStyle.Italic);
-            this.lblHint.ForeColor = System.Drawing.Color.DarkSlateGray;
+            this.lblHint.ForeColor = InkSoft;
             this.lblHint.Location = new System.Drawing.Point(left, y);
             this.lblHint.Size = new System.Drawing.Size(fieldWidth, 38);
             //this.lblHint.Text = "Arranque en frío: 1) levantá IIS Express (F5 en el sitio o iisexpress /site:SIPAF-Site). 2) Recién acá: Ctrl+F5 en ESTE proyecto (no F5). Detalle: docs/cold-start.md";
@@ -171,7 +194,7 @@ namespace NetmanConfigTool
             this.lblStatus.Location = new System.Drawing.Point(left, y);
             this.lblStatus.Size = new System.Drawing.Size(fieldWidth, 46);
             this.lblStatus.Text = "";
-            this.lblStatus.ForeColor = System.Drawing.Color.Black;
+            this.lblStatus.ForeColor = Ink;
             y += 48;
 
             // botones de accion
@@ -199,6 +222,7 @@ namespace NetmanConfigTool
 
             // lblLogs
             this.lblLogs.AutoSize = true;
+            this.lblLogs.UseMnemonic = false;
             this.lblLogs.Location = new System.Drawing.Point(left, y);
             this.lblLogs.Text = "Logs (pestañas separadas: Host & GUI / Browser):";
             y += 18;
@@ -218,8 +242,8 @@ namespace NetmanConfigTool
             this.txtLogHost.Dock = System.Windows.Forms.DockStyle.Fill;
             this.txtLogHost.Name = "txtLogHost";
             this.txtLogHost.ReadOnly = true;
-            this.txtLogHost.BackColor = System.Drawing.Color.Black;
-            this.txtLogHost.ForeColor = System.Drawing.Color.Gainsboro;
+            this.txtLogHost.BackColor = LogBack;
+            this.txtLogHost.ForeColor = LogFore;
             this.txtLogHost.Font = new System.Drawing.Font("Consolas", 9F);
             this.txtLogHost.WordWrap = false;
             this.txtLogHost.ScrollBars = System.Windows.Forms.RichTextBoxScrollBars.Both;
@@ -230,8 +254,8 @@ namespace NetmanConfigTool
             this.txtLogBrowser.Dock = System.Windows.Forms.DockStyle.Fill;
             this.txtLogBrowser.Name = "txtLogBrowser";
             this.txtLogBrowser.ReadOnly = true;
-            this.txtLogBrowser.BackColor = System.Drawing.Color.Black;
-            this.txtLogBrowser.ForeColor = System.Drawing.Color.Gainsboro;
+            this.txtLogBrowser.BackColor = LogBack;
+            this.txtLogBrowser.ForeColor = LogFore;
             this.txtLogBrowser.Font = new System.Drawing.Font("Consolas", 9F);
             this.txtLogBrowser.WordWrap = false;
             this.txtLogBrowser.ScrollBars = System.Windows.Forms.RichTextBoxScrollBars.Both;
@@ -249,12 +273,13 @@ namespace NetmanConfigTool
             this.AutoScaleDimensions = new System.Drawing.SizeF(96F, 96F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi;
             this.ClientSize = new System.Drawing.Size(left * 2 + fieldWidth, y + 24);
-            this.MinimumSize = new System.Drawing.Size(left * 2 + fieldWidth + 16, 520);
+            this.MinimumSize = new System.Drawing.Size(left * 2 + fieldWidth + 16, 540);
+            this.BackColor = FormBack;
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Sizable;
             this.MaximizeBox = true;
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "netman config";
-            this.Controls.Add(this.lblTitle);
+            this.Controls.Add(this.pnlHeader);
             this.Controls.Add(this.lblHint);
             this.Controls.Add(this.lblUser);
             this.Controls.Add(this.txtUser);

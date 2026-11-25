@@ -48,7 +48,7 @@ namespace NetmanConfigTool
         // claro + subrayado) y se guarda su rango para abrirlas con un clic.
         private static readonly Regex UrlRegex =
             new Regex(@"https?://[^\s<>""']+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-        private static readonly Color LinkColor = Color.FromArgb(110, 180, 255);
+        private static readonly Color LinkColor = Color.FromArgb(135, 206, 250);   // celeste (LightSkyBlue)
         private Font _linkFont;
 
         private struct LinkSpan
@@ -61,9 +61,106 @@ namespace NetmanConfigTool
         private readonly Dictionary<RichTextBox, List<LinkSpan>> _links =
             new Dictionary<RichTextBox, List<LinkSpan>>();
 
+        // ---- Paleta tomada del ícono (netman.ico): azul petróleo + rayo blanco ----
+        private static readonly Color Brand = Color.FromArgb(0x0B, 0x6E, 0x99);      // fondo del ícono
+        private static readonly Color BrandDark = Color.FromArgb(0x09, 0x5A, 0x7D);  // hover
+        private static readonly Color BrandDeeper = Color.FromArgb(0x07, 0x45, 0x5F);// presionado
+        private static readonly Color Accent = Color.FromArgb(0x3C, 0xB4, 0xE5);     // línea bajo el encabezado
+        private static readonly Color FormBack = Color.FromArgb(0xF3, 0xF7, 0xF9);
+        private static readonly Color Ink = Color.FromArgb(0x1F, 0x2D, 0x35);
+        private static readonly Color InkSoft = Color.FromArgb(0x4A, 0x5B, 0x66);
+        private static readonly Color LineGray = Color.FromArgb(0xB8, 0xC7, 0xCF);
+        private static readonly Color LogBack = Color.FromArgb(0x0A, 0x2A, 0x3A);    // logs: azul muy oscuro, no negro puro
+        private static readonly Color LogFore = Color.FromArgb(0xD6, 0xE4, 0xEC);
+        private static readonly Color OkColor = Color.FromArgb(0x0F, 0x7A, 0x5C);
+        private static readonly Color ErrColor = Color.FromArgb(0xC0, 0x39, 0x2B);
+
+        private enum BtnKind { Primary, Outline, Neutral }
+
+        /// <summary>
+        /// Botón plano con los colores de la marca. Se repinta al habilitar o
+        /// deshabilitar: un botón Flat deshabilitado conserva su BackColor y
+        /// quedaría texto gris sobre azul.
+        /// </summary>
+        private static void StyleButton(Button b, BtnKind kind)
+        {
+            b.FlatStyle = FlatStyle.Flat;
+            b.UseVisualStyleBackColor = false;
+            b.Cursor = Cursors.Hand;
+            b.FlatAppearance.BorderSize = 1;
+
+            Action apply = delegate
+            {
+                if (!b.Enabled)
+                {
+                    b.BackColor = Color.FromArgb(0xE4, 0xE9, 0xEC);
+                    b.ForeColor = Color.FromArgb(0x93, 0xA1, 0xAA);
+                    b.FlatAppearance.BorderColor = Color.FromArgb(0xD3, 0xDB, 0xE0);
+                    b.Cursor = Cursors.Default;
+                    return;
+                }
+
+                b.Cursor = Cursors.Hand;
+                switch (kind)
+                {
+                    case BtnKind.Primary:
+                        b.BackColor = Brand;
+                        b.ForeColor = Color.White;
+                        b.FlatAppearance.BorderColor = Brand;
+                        b.FlatAppearance.MouseOverBackColor = BrandDark;
+                        b.FlatAppearance.MouseDownBackColor = BrandDeeper;
+                        break;
+                    case BtnKind.Outline:
+                        b.BackColor = Color.White;
+                        b.ForeColor = Brand;
+                        b.FlatAppearance.BorderColor = Brand;
+                        b.FlatAppearance.MouseOverBackColor = Color.FromArgb(0xE3, 0xF0, 0xF6);
+                        b.FlatAppearance.MouseDownBackColor = Color.FromArgb(0xCB, 0xE2, 0xEC);
+                        break;
+                    default:
+                        b.BackColor = Color.White;
+                        b.ForeColor = Ink;
+                        b.FlatAppearance.BorderColor = LineGray;
+                        b.FlatAppearance.MouseOverBackColor = Color.FromArgb(0xEC, 0xF1, 0xF4);
+                        b.FlatAppearance.MouseDownBackColor = Color.FromArgb(0xDD, 0xE5, 0xEA);
+                        break;
+                }
+            };
+
+            apply();
+            b.EnabledChanged += delegate { apply(); };
+        }
+
+        private void ApplyBrandStyle()
+        {
+            StyleButton(btnIniciar, BtnKind.Primary);
+            StyleButton(btnGuardar, BtnKind.Outline);
+            StyleButton(btnProbarSitio, BtnKind.Outline);
+            StyleButton(btnBrowseLibreria, BtnKind.Outline);
+            StyleButton(btnBrowseSitePath, BtnKind.Outline);
+            StyleButton(btnDetener, BtnKind.Neutral);
+            StyleButton(btnCerrar, BtnKind.Neutral);
+
+            foreach (Label l in new Label[] { lblUser, lblPass, lblLibreria, lblSitePath, lblSiteUrl, lblLogs })
+            {
+                l.ForeColor = Ink;
+            }
+        }
+
+        // Línea de acento (azul claro) en el borde inferior del encabezado.
+        private void pnlHeader_Paint(object sender, PaintEventArgs e)
+        {
+            int h = Math.Max(2, (int)Math.Round(3 * e.Graphics.DpiY / 96f));
+            using (var br = new SolidBrush(Accent))
+            {
+                e.Graphics.FillRectangle(br, 0, pnlHeader.Height - h, pnlHeader.Width, h);
+            }
+        }
+
         public ConfigForm()
         {
             InitializeComponent();
+            ApplyBrandStyle();
 
             try
             {
@@ -93,7 +190,7 @@ namespace NetmanConfigTool
         // campos y botones de arriba: el bloque se ensancha hasta un máximo
         // y queda centrado. Trabaja con deltas sobre la posición actual (la que
         // dejó el escalado por DPI), así no depende de medidas fijas.
-        private const int MaxContentWidth = 900;   // px a 96 DPI
+        private const int MaxContentWidth = 750;   // px a 96 DPI
         private const int ContentMargin = 16;      // px a 96 DPI
 
         private void ApplyResponsiveLayout()
@@ -128,7 +225,7 @@ namespace NetmanConfigTool
             {
                 // Alineados a la izquierda del bloque: solo se desplazan.
                 foreach (Control c in new Control[] {
-                    lblTitle, lblUser, lblPass, lblLibreria, lblSitePath, lblSiteUrl,
+                    logo, lblTitle, lblUser, lblPass, lblLibreria, lblSitePath, lblSiteUrl,
                     btnGuardar, btnIniciar, btnDetener })
                 {
                     c.Left += dL;
@@ -900,7 +997,7 @@ namespace NetmanConfigTool
         {
             lblStatus.Text = text;
             // Alto contraste: rojo fuerte para error, verde fuerte para OK/neutro.
-            lblStatus.ForeColor = isError ? System.Drawing.Color.DarkRed : System.Drawing.Color.DarkGreen;
+            lblStatus.ForeColor = isError ? ErrColor : OkColor;
         }
 
         private System.Windows.Forms.RichTextBox BoxForTag(string tag)
@@ -957,7 +1054,7 @@ namespace NetmanConfigTool
 
             if (_linkFont == null)
             {
-                _linkFont = new Font(box.Font, FontStyle.Underline);
+                _linkFont = new Font(box.Font, FontStyle.Bold | FontStyle.Underline);
             }
 
             foreach (Match m in matches)
@@ -1039,6 +1136,59 @@ namespace NetmanConfigTool
             {
                 AppendLog("GUI", "No pude abrir " + url + ": " + ex.Message);
             }
+        }
+    }
+
+    /// <summary>
+    /// El rayo del ícono (netman.ico) dibujado con vectores: queda nítido a
+    /// cualquier DPI y no depende de extraer un tamaño de ícono concreto.
+    /// Cuadrado redondeado translúcido + rayo blanco, para el encabezado azul.
+    /// </summary>
+    internal sealed class BoltLogo : Control
+    {
+        // Rayo sobre una grilla de 256x256 (medido del ícono original).
+        private static readonly PointF[] Bolt =
+        {
+            new PointF(150, 20), new PointF(70, 123), new PointF(124, 125),
+            new PointF(103, 236), new PointF(190, 110), new PointF(138, 112)
+        };
+
+        public BoltLogo()
+        {
+            SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.UserPaint
+                | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+            BackColor = Color.Transparent;
+            TabStop = false;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            Graphics g = e.Graphics;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+            float s = Math.Min(Width, Height);
+            float r = s * 0.22f;
+            float d = r * 2f;
+            using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+            {
+                path.AddArc(0, 0, d, d, 180, 90);
+                path.AddArc(s - d - 1, 0, d, d, 270, 90);
+                path.AddArc(s - d - 1, s - d - 1, d, d, 0, 90);
+                path.AddArc(0, s - d - 1, d, d, 90, 90);
+                path.CloseFigure();
+                using (var br = new SolidBrush(Color.FromArgb(46, 255, 255, 255)))
+                {
+                    g.FillPath(br, path);
+                }
+            }
+
+            var pts = new PointF[Bolt.Length];
+            for (int i = 0; i < Bolt.Length; i++)
+            {
+                pts[i] = new PointF(Bolt[i].X * s / 256f, Bolt[i].Y * s / 256f);
+            }
+            g.FillPolygon(Brushes.White, pts);
         }
     }
 }
