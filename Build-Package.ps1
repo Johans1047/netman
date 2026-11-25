@@ -90,7 +90,8 @@ if (Test-Path $newtonsoft) {
     foreach ($cfg in @('src\Host\packages.config', 'src\Worker\packages.config')) {
         $prev = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'   # nuget escribe a stderr aunque no falle
-        & $nuget restore (Join-Path $root $cfg) -SolutionDirectory $root 2>&1 | Out-Host
+        # -Source explicito: la config de NuGet de algunas maquinas deja solo la cache local como fuente.
+        & $nuget restore (Join-Path $root $cfg) -SolutionDirectory $root -Source 'https://api.nuget.org/v3/index.json' 2>&1 | Out-Host
         $code = $LASTEXITCODE
         $ErrorActionPreference = $prev
         if ($code -ne 0) { throw "nuget restore fallo para $cfg." }

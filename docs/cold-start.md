@@ -82,3 +82,15 @@ cada reciclaje**; por eso tras un cambio de librería hay que volver a elegir m�
   bienvenida, es un cambio de librería (reciclo), esperado.
 - Comportamiento raro con varios watchers → asegurate de tener **una sola** instancia de
   `HotReloadTool.Host` (puede quedar una vieja del GUI + otra del `.cmd`).
+
+## Compilar desde el código (alternativa al paquete)
+
+Para quien clona el repo en vez de recibir el ZIP armado:
+
+1. Abri **`HotReloadTool.Product.sln`** (Host y librerias, sin los proyectos de tests) y `NetmanConfigTool.sln`, y compila los dos. `HotReloadTool.sln` incluye los tests (xunit), que necesitan restaurar mas paquetes; solo hace falta si vas a correr las pruebas.
+2. Si NuGet no restaura solo (carpeta `packages\` vacia), restaura asi:
+   `nuget restore src\Host\packages.config -SolutionDirectory . -Source https://api.nuget.org/v3/index.json` (idem `src\Worker\packages.config`).
+3. El Host queda en `src\Host\bin\Debug\` y el ConfigTool en `src\ConfigTool\bin\Debug\NetmanConfigTool.exe`. El resto es igual: el ConfigTool instala Playwright (y Node portable si falta) la primera vez.
+
+Por consola: `MSBuild src\Host\HotReloadTool.Host.csproj` y `MSBuild src\ConfigTool\NetmanConfigTool.csproj`.
+Para entregar un ZIP: `.\Build-Package.ps1` (o `-Portable`).
