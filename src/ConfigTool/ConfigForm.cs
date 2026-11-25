@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
@@ -40,6 +42,25 @@ namespace NetmanConfigTool
         /// </summary>
         private string _nodeHome;
 
+        // ---- URLs clickeables en los logs ---------------------------------
+        // Los logs son RichTextBox sobre fondo negro: el azul por defecto de
+        // DetectUrls casi no se lee, así que las URLs se pintan a mano (azul
+        // claro + subrayado) y se guarda su rango para abrirlas con un clic.
+        private static readonly Regex UrlRegex =
+            new Regex(@"https?://[^\s<>""']+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Color LinkColor = Color.FromArgb(110, 180, 255);
+        private Font _linkFont;
+
+        private struct LinkSpan
+        {
+            public int Start;
+            public int Length;
+            public string Url;
+        }
+
+        private readonly Dictionary<RichTextBox, List<LinkSpan>> _links =
+            new Dictionary<RichTextBox, List<LinkSpan>>();
+
         public ConfigForm()
         {
             InitializeComponent();
@@ -60,6 +81,9 @@ namespace NetmanConfigTool
 
             Load += ConfigForm_Load;
             FormClosing += ConfigForm_FormClosing;
+
+            WireLinks(txtLogHost);
+            WireLinks(txtLogBrowser);
         }
 
         /// <summary>
@@ -825,6 +849,8 @@ namespace NetmanConfigTool
             }
             txtLogHost.Clear();
             txtLogBrowser.Clear();
+            _links[txtLogHost].Clear();
+            _links[txtLogBrowser].Clear();
         }
 
         private void AppendLog(string tag, string line)
@@ -835,9 +861,113 @@ namespace NetmanConfigTool
                 try { box.Invoke(new Action<string, string>(AppendLog), tag, line); } catch { }
                 return;
             }
-            box.AppendText("[" + tag + "] " + line + Environment.NewLine);
+            int start = box.TextLength;
+            string text = "[" + tag + "] " + line + Environment.NewLine;
+            box.AppendText(text);
+            MarkLinks(box, start, text);
             box.SelectionStart = box.TextLength;
             box.ScrollToCaret();
+        }
+
+        /// <summary>Quita la puntuación que suele pegarse al final de una URL en una frase.</summary>
+        private static string TrimUrl(string url)
+        {
+            return url.TrimEnd('.', ',', ';', ':', '!', '?', ')', ']', '}', '\'', '"');
+        }
+
+        /// <summary>Pinta como enlace cada URL de la línea recién agregada y guarda su rango.</summary>
+        private void MarkLinks(RichTextBox box, int lineStart, string text)
+        {
+            var matches = UrlRegex.Matches(text);
+            if (matches.Count == 0)
+            {
+                return;
+            }
+
+            if (_linkFont == null)
+            {
+                _linkFont = new Font(box.Font, FontStyle.Underline);
+            }
+
+            foreach (Match m in matches)
+            {
+                string url = TrimUrl(m.Value);
+                if (url.Length <= "https://".Length)
+                {
+                    continue;
+                }
+
+                int start = lineStart + m.Index;
+                box.Select(start, url.Length);
+                box.SelectionColor = LinkColor;
+                box.SelectionFont = _linkFont;
+                _links[box].Add(new LinkSpan { Start = start, Length = url.Length, Url = url });
+            }
+
+            // Lo que se agregue después vuelve al estilo normal.
+            box.Select(box.TextLength, 0);
+            box.SelectionColor = box.ForeColor;
+            box.SelectionFont = box.Font;
+        }
+
+        private void WireLinks(RichTextBox box)
+        {
+            _links[box] = new List<LinkSpan>();
+            box.MouseMove += LogBox_MouseMove;
+            box.MouseClick += LogBox_MouseClick;
+        }
+
+        /// <summary>Devuelve la URL bajo el puntero, o null si no hay ninguna.</summary>
+        private string UrlAt(RichTextBox box, Point location)
+        {
+            int index = box.GetCharIndexFromPosition(location);
+            List<LinkSpan> spans = _links[box];
+            for (int i = spans.Count - 1; i >= 0; i--)
+            {
+                LinkSpan span = spans[i];
+                if (index >= span.Start && index < span.Start + span.Length)
+                {
+                    // GetCharIndexFromPosition devuelve el carácter más cercano:
+                    // si el puntero está pasado el final de la URL, no cuenta.
+                    Point end = box.GetPositionFromCharIndex(span.Start + span.Length - 1);
+                    if (location.Y >= end.Y && location.Y <= end.Y + box.Font.Height * 2
+                        && (index < span.Start + span.Length - 1 || location.X <= end.X + (int)box.Font.Size * 2))
+                    {
+                        return span.Url;
+                    }
+                }
+            }
+            return null;
+        }
+
+        private void LogBox_MouseMove(object sender, MouseEventArgs e)
+        {
+            var box = (RichTextBox)sender;
+            box.Cursor = UrlAt(box, e.Location) != null ? Cursors.Hand : Cursors.IBeam;
+        }
+
+        private void LogBox_MouseClick(object sender, MouseEventArgs e)
+        {
+            var box = (RichTextBox)sender;
+            if (e.Button != MouseButtons.Left || box.SelectionLength > 0)
+            {
+                return; // arrastrar para seleccionar/copiar texto no abre nada
+            }
+
+            string url = UrlAt(box, e.Location);
+            if (url == null)
+            {
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                AppendLog("GUI", "No pude abrir " + url + ": " + ex.Message);
+            }
         }
     }
 }
