@@ -26,7 +26,7 @@ HotReloadTool.Host <command> [options]
 | `--drain-timeout <ms>` | — | `3000` | Maximum time in milliseconds to wait for connection draining before force-terminating the old worker. |
 | `--pipe-name <name>` | — | `hotreload-state` | Named Pipes endpoint name for Host↔Worker IPC. |
 | `--web-watch <dir>` | — | — | Also watch this directory for web-file changes (`.aspx`/`.aspx.vb`). Requires `--mode build-recycle`; changes here skip the build and go straight to recycle. |
-| `--web-extensions <csv>` | — | `*.aspx,*.aspx.vb` | Comma-separated web-watch extensions. |
+| `--web-extensions <csv>` | — | `*.aspx,*.aspx.vb,*.ascx,*.ascx.vb,*.master,*.master.vb,*.js,*.css` | Comma-separated web-watch extensions. |
 | `--site-url <url>` | — | — | Base URL of the running site, e.g. `http://localhost:12345/SIPAF/`. With `--web-watch`, netman prints the direct URL of the changed page after each web-file recycle (code-behind changes map to their `.aspx`). |
 
 ### Additional defaults (not exposed as CLI flags)

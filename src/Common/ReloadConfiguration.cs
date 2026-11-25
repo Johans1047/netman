@@ -109,7 +109,8 @@ namespace HotReloadTool.Common
 
         /// <summary>
         /// File extensions under <see cref="WebWatchDirectory"/> that trigger
-        /// a recycle when changed. Default: <c>["*.aspx","*.aspx.vb"]</c>.
+        /// a web reload when changed. Default: pages, user controls, master pages
+        /// (and their code-behind), plus <c>*.js</c> and <c>*.css</c>.
         /// </summary>
         public List<string> WebExtensions { get; set; }
 
@@ -202,7 +203,7 @@ namespace HotReloadTool.Common
             Mode = ReloadMode.Process;
             Extensions = new List<string> { "*.cs", "*.config" };
             ExclusionPatterns = new List<string> { "**/obj/**", "**/bin/**", "**/*.tmp" };
-            WebExtensions = new List<string> { "*.aspx", "*.aspx.vb" };
+            WebExtensions = new List<string> { "*.aspx", "*.aspx.vb", "*.ascx", "*.ascx.vb", "*.master", "*.master.vb", "*.js", "*.css" };
             DebounceMilliseconds = 500;
             DrainTimeoutMilliseconds = 3000;
             StateTransferTimeoutMilliseconds = 5000;

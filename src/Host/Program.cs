@@ -484,10 +484,10 @@ namespace HotReloadTool.Host
             Console.WriteLine("  --extensions <csv>     Comma-separated watch extensions (default: *.cs,*.config).");
             Console.WriteLine("  --deploy-to <dir>      Copy build output here (required for build-recycle).");
             Console.WriteLine("  --recycle-target <file> Touch this file to recycle ASP.NET (required for build-recycle).");
-            Console.WriteLine("  --web-watch <dir>      Also watch this directory for web-file changes (.aspx/.aspx.vb).");
+            Console.WriteLine("  --web-watch <dir>      Also watch this directory for web-file changes (.aspx, .ascx, .master, their .vb code-behind, .js, .css).");
             Console.WriteLine("                         Requires --mode build-recycle. Changes here skip the build");
             Console.WriteLine("                         and go straight to recycle.");
-            Console.WriteLine("  --web-extensions <csv> Comma-separated web-watch extensions (default: *.aspx,*.aspx.vb).");
+            Console.WriteLine("  --web-extensions <csv> Comma-separated web-watch extensions (default: *.aspx,*.aspx.vb,*.ascx,*.ascx.vb,*.master,*.master.vb,*.js,*.css).");
             Console.WriteLine("  --site-url <url>       Base URL of the running site (e.g. http://localhost:12345/SIPAF/).");
             Console.WriteLine("                         With --web-watch, prints the direct URL of the changed page");
             Console.WriteLine("                         after each web-file recycle.");

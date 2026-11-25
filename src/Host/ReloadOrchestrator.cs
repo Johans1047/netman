@@ -450,14 +450,24 @@ namespace HotReloadTool.Host
             string targetUrl = null;
             if (changedPaths != null && changedPaths.Count > 0)
             {
-                var urls = changedPaths
+                var allUrls = changedPaths
                     .Select(BuildPageUrl)
-                    .Where(u => !string.IsNullOrEmpty(u))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
 
-                if (urls.Count == 1)
-                    targetUrl = urls[0];
+                // A user control (.ascx), master page, .js or .css has no URL of
+                // its own: it is rendered INSIDE whatever page the user has
+                // open (or any page that includes it). If any changed file is
+                // like that, don't navigate anywhere: leave the target blank so
+                // the browser reloads the page it is already on.
+                if (allUrls.All(u => !string.IsNullOrEmpty(u)))
+                {
+                    var urls = allUrls
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    if (urls.Count == 1)
+                        targetUrl = urls[0];
+                }
             }
 
             try
@@ -544,6 +554,11 @@ namespace HotReloadTool.Host
                 relative = relative.Substring(0, relative.Length - ".vb".Length);
             else if (relative.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
                 relative = relative.Substring(0, relative.Length - ".cs".Length);
+
+            // Only a .aspx has a URL of its own. A user control, master page,
+            // script or stylesheet is part of other pages: no direct URL.
+            if (!relative.EndsWith(".aspx", StringComparison.OrdinalIgnoreCase))
+                return null;
 
             string[] segments = relative.Split('\\', '/');
             string encodedRelative = string.Join("/", segments.Select(Uri.EscapeDataString));
