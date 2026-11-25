@@ -82,9 +82,9 @@ if (-not (Test-Path $nuget)) {
 # Solo se restauran los packages.config de Host y Worker (lo unico que usa el
 # paquete). NO se restaura la .sln completa: los proyectos de pruebas pueden
 # usar PackageReference, que el MSBuild 12 de VS2013 no entiende.
-$newtonsoft = Join-Path $root 'packages\Newtonsoft.Json.9.0.1\lib\net45\Newtonsoft.Json.dll'
+$newtonsoft = Join-Path $root 'packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll'
 if (Test-Path $newtonsoft) {
-    Write-Step 'Paquetes NuGet ya restaurados (Newtonsoft.Json 9.0.1).'
+    Write-Step 'Paquetes NuGet ya restaurados (Newtonsoft.Json 13.0.3).'
 } else {
     Write-Step 'Restaurando paquetes NuGet...'
     foreach ($cfg in @('src\Host\packages.config', 'src\Worker\packages.config')) {

@@ -98,7 +98,7 @@ Example:
 
 ## Serialization
 
-- Library: **Newtonsoft.Json 9.0.1**
+- Library: **Newtonsoft.Json 13.0.3**
 - State JSON is a raw string — workers serialize/deserialize their own object graphs.
 
 ## Timeout
