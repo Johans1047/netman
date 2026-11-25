@@ -84,6 +84,75 @@ namespace NetmanConfigTool
 
             WireLinks(txtLogHost);
             WireLinks(txtLogBrowser);
+
+            SizeChanged += (s, e) => ApplyResponsiveLayout();
+        }
+
+        // ---- Diseño adaptable: la parte de arriba sigue el ancho de la ventana ----
+        // Los logs ya crecen con la ventana (Anchor). Esto hace lo mismo con los
+        // campos y botones de arriba: el bloque se ensancha hasta un máximo
+        // y queda centrado. Trabaja con deltas sobre la posición actual (la que
+        // dejó el escalado por DPI), así no depende de medidas fijas.
+        private const int MaxContentWidth = 900;   // px a 96 DPI
+        private const int ContentMargin = 16;      // px a 96 DPI
+
+        private void ApplyResponsiveLayout()
+        {
+            if (txtUser == null || WindowState == FormWindowState.Minimized)
+            {
+                return;
+            }
+
+            float dpi = CurrentAutoScaleDimensions.Width / 96f;
+            if (dpi <= 0f) dpi = 1f;
+
+            int margin = (int)(ContentMargin * dpi);
+            int available = ClientSize.Width - 2 * margin;
+            int newWidth = Math.Min(available, (int)(MaxContentWidth * dpi));
+            int curWidth = txtUser.Width;
+            if (newWidth < 1 || curWidth < 1)
+            {
+                return;
+            }
+
+            int newLeft = (ClientSize.Width - newWidth) / 2;
+            int dL = newLeft - txtUser.Left;
+            int dW = newWidth - curWidth;
+            if (dL == 0 && dW == 0)
+            {
+                return;
+            }
+
+            SuspendLayout();
+            try
+            {
+                // Alineados a la izquierda del bloque: solo se desplazan.
+                foreach (Control c in new Control[] {
+                    lblTitle, lblUser, lblPass, lblLibreria, lblSitePath, lblSiteUrl,
+                    btnGuardar, btnIniciar, btnDetener })
+                {
+                    c.Left += dL;
+                }
+
+                // Ocupan todo el ancho del bloque: se desplazan y se estiran.
+                foreach (Control c in new Control[] {
+                    lblHint, txtUser, txtPass, txtLibreria, txtSitePath, txtSiteUrl, lblStatus })
+                {
+                    c.Left += dL;
+                    c.Width += dW;
+                }
+
+                // Pegados al borde derecho del bloque: se desplazan y siguen el borde.
+                foreach (Control c in new Control[] {
+                    btnBrowseLibreria, btnBrowseSitePath, btnProbarSitio, btnCerrar })
+                {
+                    c.Left += dL + dW;
+                }
+            }
+            finally
+            {
+                ResumeLayout();
+            }
         }
 
         /// <summary>
@@ -111,6 +180,8 @@ namespace NetmanConfigTool
 
         private void ConfigForm_Load(object sender, EventArgs e)
         {
+            ApplyResponsiveLayout();
+
             var cfg = NetmanConfig.Load(_configPath);
 
             txtUser.Text = cfg.SipafUser;
