@@ -92,5 +92,7 @@ Para quien clona el repo en vez de recibir el ZIP armado:
    `nuget restore src\Host\packages.config -SolutionDirectory . -Source https://api.nuget.org/v3/index.json` (idem `src\Worker\packages.config`).
 3. El Host queda en `src\Host\bin\Debug\` y el ConfigTool en `src\ConfigTool\bin\Debug\NetmanConfigTool.exe`. El resto es igual: el ConfigTool instala Playwright (y Node portable si falta) la primera vez.
 
+Para compilar y correr las pruebas (`HotReloadTool.sln`), restaura tambien los `packages.config` de `tests\Common.Tests`, `tests\Host.Tests`, `tests\Host.Tests\Fixtures` y `tests\Worker.Tests` con el mismo comando (con `-Source`); despues `packages\xunit.runner.console.2.3.1\tools\net452\xunit.console.exe tests\<X>.Tests\bin\Debug\HotReloadTool.<X>.Tests.dll`. Con MSBuild 12 compila y pasan las 106 pruebas.
+
 Por consola: `MSBuild src\Host\HotReloadTool.Host.csproj` y `MSBuild src\ConfigTool\NetmanConfigTool.csproj`.
 Para entregar un ZIP: `.\Build-Package.ps1` (o `-Portable`).
