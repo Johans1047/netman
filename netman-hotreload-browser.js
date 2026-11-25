@@ -145,6 +145,25 @@ function getContentFrame(page) {
   return page.frames().find(f => f.name() === CONTENT_FRAME_NAME) || null;
 }
 
+// Normaliza una URL para compararla (sin query ni hash, minusculas). null si no parsea.
+function urlKey(u) {
+  try {
+    const x = new URL(u);
+    return (x.origin + x.pathname).toLowerCase();
+  } catch { return null; }
+}
+
+// Frame anidado (iframe dentro del frame de contenido, o mas adentro) que ya
+// tiene cargada exactamente la pagina editada. Si existe, hay que recargar ESE
+// frame y no navegar "Contenido" a la pagina editada: eso reemplazaria la
+// pagina contenedora (la que tiene el iframe) por la pagina interna sola.
+// excludeFrame: el propio "Contenido", que se trata aparte (recarga o navega).
+function findFrameByUrl(page, targetUrl, excludeFrame) {
+  const key = urlKey(targetUrl);
+  if (!key) return null;
+  return page.frames().find(f => f !== page.mainFrame() && f !== excludeFrame && urlKey(f.url()) === key) || null;
+}
+
 // URL "real" en la que esta trabajando el usuario: la del iframe de
 // contenido si existe, si no la de la pagina top-level.
 function currentWorkUrl(page) {
@@ -418,8 +437,15 @@ const BROWSER_CHANNEL = process.env.NETMAN_BROWSER_CHANNEL || 'msedge';
         // directo (caso "pagina A llama a pagina B", editaste B estando en
         // A). Si no, nos quedamos con el comportamiento de siempre: recargar
         // la URL actual del frame.
-        const dest = stampTarget || frame.url();
-        if (stampTarget && stampTarget !== frame.url()) {
+        // Si la pagina editada ya esta cargada en un iframe anidado (p. ej. un
+        // detalle dentro de la pagina que muestra "Contenido"), se recarga ese
+        // frame. Si no, se sigue como siempre sobre "Contenido".
+        const nestedFrame = stampTarget ? findFrameByUrl(page, stampTarget, frame) : null;
+        const reloadFrame = nestedFrame || frame;
+        const dest = nestedFrame ? nestedFrame.url() : (stampTarget || frame.url());
+        if (nestedFrame) {
+          log('Cambio web. La pagina editada esta en un iframe anidado -- recargando ese frame: ' + dest);
+        } else if (stampTarget && stampTarget !== frame.url()) {
           log('Cambio web. Pagina editada distinta de donde estas parado -- navegando frame "' + CONTENT_FRAME_NAME + '" a: ' + dest);
         } else {
           log('Cambio web. Recargando frame "' + CONTENT_FRAME_NAME + '": ' + dest);
@@ -436,10 +462,11 @@ const BROWSER_CHANNEL = process.env.NETMAN_BROWSER_CHANNEL || 'msedge';
         // request tal cual, asi nunca dispara ese dialog, haya habido
         // postback o no -- y de paso sirve igual para navegar a una URL
         // distinta cuando dest viene del stamp.
-        await frame.goto(dest, { waitUntil: 'domcontentloaded' }).catch(async () => {
+        await reloadFrame.goto(dest, { waitUntil: 'domcontentloaded' }).catch(async () => {
           // Fallback si goto falla (frame recien reemplazado, etc.):
           // reasignar location.href desde la pagina padre (asignar .href es
           // una navegacion GET nueva, no un reload).
+          if (reloadFrame !== frame) return;   // el fallback por nombre solo aplica a "Contenido"
           await page.evaluate((name, url) => {
             const f = window.frames[name];
             if (f) f.location.href = url;
