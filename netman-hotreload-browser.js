@@ -32,6 +32,10 @@ const PASS = process.env.NETMAN_SIPAF_PASS || '';
 const STAMP_DIR = path.join(__dirname, 'src', 'Host', 'bin', 'Debug');
 const WEB_STAMP = path.join(STAMP_DIR, 'web-reload.stamp');
 const RECYCLE_STAMP = path.join(STAMP_DIR, 'recycle.stamp');
+// Pedido de "abrir esta URL en el navegador de netman": el ConfigTool escribe
+// la URL en este archivo cuando haces clic en un enlace de sus logs, y este
+// script la abre en una pestaña de ESTE navegador (misma sesion/cookies).
+const OPEN_URL_REQUEST = path.join(STAMP_DIR, 'open-url.request');
 const CONTENT_FRAME_NAME = 'Contenido';
 // DESCARGAS. Playwright NO guarda las descargas como un Chrome normal: las deja
 // en una carpeta temporal con nombre GUID y las BORRA cuando se cierra el
@@ -418,10 +422,36 @@ const BROWSER_CHANNEL = process.env.NETMAN_BROWSER_CHANNEL || 'msedge';
 
   let lastWeb = mtime(WEB_STAMP);
   let lastRec = mtime(RECYCLE_STAMP);
+  let lastOpen = mtime(OPEN_URL_REQUEST);   // un pedido viejo de antes de arrancar no se repite
+
+  // Pestaña reutilizable para los enlaces que se abren desde el ConfigTool.
+  let linkPage = null;
+  async function openRequestedUrl() {
+    let url = '';
+    try { url = fs.readFileSync(OPEN_URL_REQUEST, 'utf8').replace(/^\uFEFF/, '').trim(); } catch {}
+    if (!/^https?:\/\//i.test(url)) {
+      log('Pedido de abrir URL ignorado (no es http/https): ' + url);
+      return;
+    }
+    try {
+      if (!linkPage || linkPage.isClosed()) linkPage = await context.newPage();
+      log('Abriendo enlace del log en este navegador: ' + url);
+      await linkPage.goto(url, { waitUntil: 'domcontentloaded' }).catch(() => {});
+      await linkPage.bringToFront().catch(() => {});
+    } catch (e) {
+      log('No se pudo abrir ' + url + ': ' + e.message);
+    }
+  }
 
   while (true) {
     await sleep(800);
     snapshotWorkPage();
+
+    const o = mtime(OPEN_URL_REQUEST);
+    if (o !== lastOpen) {
+      lastOpen = o;
+      await openRequestedUrl();
+    }
 
     const w = mtime(WEB_STAMP);
     const r = mtime(RECYCLE_STAMP);

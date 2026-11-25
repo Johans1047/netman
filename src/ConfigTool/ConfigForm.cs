@@ -1108,6 +1108,32 @@ namespace NetmanConfigTool
             return null;
         }
 
+        /// <summary>
+        /// Le pide al navegador de netman que abra la URL: escribe
+        /// open-url.request junto al Host y el script de Node (que revisa ese
+        /// archivo cada ~1 s) la abre en una pestaña del mismo navegador.
+        /// Devuelve false si ese navegador no está corriendo.
+        /// </summary>
+        private bool OpenInNetmanBrowser(string url)
+        {
+            try
+            {
+                if (_browserProcess == null || _browserProcess.HasExited)
+                {
+                    return false;
+                }
+
+                string file = Path.Combine(Path.GetDirectoryName(_hostExePath), "open-url.request");
+                File.WriteAllText(file, url + Environment.NewLine);
+                AppendLog("GUI", "Abriendo en el navegador de netman: " + url);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private void LogBox_MouseMove(object sender, MouseEventArgs e)
         {
             var box = (RichTextBox)sender;
@@ -1124,6 +1150,14 @@ namespace NetmanConfigTool
 
             string url = UrlAt(box, e.Location);
             if (url == null)
+            {
+                return;
+            }
+
+            // Con netman corriendo, el enlace se abre en SU navegador (el de
+            // Playwright, que ya tiene la sesión de SIPAF). Si no está
+            // corriendo, cae al navegador predeterminado de Windows.
+            if (OpenInNetmanBrowser(url))
             {
                 return;
             }
