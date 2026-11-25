@@ -76,3 +76,7 @@ _to_delete/
 
 # Salida de Build-Package.ps1
 dist/
+
+# Los lanzadores de bin\ (netman-sipaf.cmd, netman-open.cmd) SI se versionan: los
+# usa Build-Package.ps1. Los bin\ de compilacion (src\**\bin\) siguen ignorados.
+!/bin/
