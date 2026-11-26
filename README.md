@@ -13,7 +13,7 @@ netman is made of three parts: a **Host** (.NET Framework, file watcher + build/
 script** (Node.js + Playwright, drives Edge with auto-login and reloads), and a **ConfigTool** (Windows Forms GUI
 to configure and start/stop everything).
 
-> Spanish quick-start: [`LEEME.md`](LEEME.md) (also shipped as `LEEME.txt` inside the ZIP packages). Operational details (cold start, what each button does,
+> Spanish quick-start: [`LEEME.md`](LEEME.md) (also included in the ZIP packages). Operational details (cold start, what each button does,
 > troubleshooting): [`docs/cold-start.md`](docs/cold-start.md) (Spanish).
 
 ## Requirements

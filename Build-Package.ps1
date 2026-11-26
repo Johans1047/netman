@@ -117,7 +117,7 @@ New-Item -ItemType Directory -Path $stage | Out-Null
 
 $rootFiles = @('Start-Netman.ps1', 'Install-Netman.ps1', 'Abrir-NetmanConfig.cmd', 'netman-hotreload-browser.js',
                'netman-auto-login.js', 'netman-config.js', 'package.json', 'package-lock.json',
-               'netman.config.example.json', 'LEEME.txt')
+               'netman.config.example.json', 'LEEME.md', 'README.md')
 foreach ($f in $rootFiles) {
     $src = Join-Path $root $f
     if (Test-Path $src) { Copy-Item $src $stage } else { Write-Warning "Falta $f (se omite)." }
@@ -193,4 +193,4 @@ if (-not $NoZip) {
     Write-Host ""
     Write-Host "Listo: $stage" -ForegroundColor Green
 }
-Write-Host "Quien lo reciba: descomprime y ejecuta Install-Netman.ps1 (ver LEEME.txt)."
+Write-Host "Quien lo reciba: descomprime y ejecuta Install-Netman.ps1 (ver LEEME.md)."
