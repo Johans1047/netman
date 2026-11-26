@@ -101,14 +101,31 @@ method 1 or 2.
 Installed copies check GitHub for a newer release (see [Updating](#updating)), so a release is how an update
 reaches everyone:
 
-1. Edit [`VERSION`](VERSION) (e.g. `0.6.1`) and commit it.
-2. Build both packages: `.\Build-Package.ps1` and `.\Build-Package.ps1 -Portable`.
-3. Create the release with the tag `v` + the version, attaching both ZIPs:
+1. Edit [`VERSION`](VERSION) (e.g. `0.6.3`) and commit it.
+2. Build both packages: `.\Build-Package.ps1` and `.\Build-Package.ps1 -Portable`. Each ZIP is signed
+   automatically (see below) and gets a `.zip.sig` next to it.
+3. Create the release with the tag `v` + the version, attaching **the ZIPs and their `.sig` files**:
    ```powershell
-   gh release create v0.6.1 dist\netman-0.6.1.zip dist\netman-0.6.1-portable.zip --title "netman 0.6.1" --notes "What changed"
+   gh release create v0.6.3 dist\netman-0.6.3.zip dist\netman-0.6.3.zip.sig dist\netman-0.6.3-portable.zip dist\netman-0.6.3-portable.zip.sig --title "netman 0.6.3" --notes "What changed"
    ```
 
-The updater uses the ZIP **without** `-portable` in its name, so keep both assets named like that.
+The updater uses the ZIP **without** `-portable` in its name, so keep the assets named like that.
+
+#### Package signing
+
+The updater only installs a package whose `.sig` is a valid RSA-SHA256 signature for the public key built into
+the ConfigTool ([`src/ConfigTool/UpdateKey.cs`](src/ConfigTool/UpdateKey.cs)). Even if someone could swap the
+files of a release on GitHub, installed copies would reject them: without the private key a valid signature
+cannot be produced. The updater also checks that the `version.txt` inside the ZIP matches the release tag, so
+an old signed package cannot be passed off as a new one.
+
+- The **private key** lives only on the publisher's machine: `%USERPROFILE%\.netman\signing-key.xml`. It is never
+  in the repository. **Back it up** (password manager): if it is lost, installed copies cannot verify new
+  releases and everyone has to reinstall by hand with a new key.
+- `.\Sign-Package.ps1 -NewKey` creates a key pair (refuses to overwrite an existing one) and writes the public
+  half to `UpdateKey.cs`. `.\Sign-Package.ps1 -Zip <file>` signs one package manually.
+- Versions up to 0.6.1 predate signing: they update to the first signed release (0.6.2) checking only the
+  SHA-256 GitHub reports; from there on every update is signature-checked.
 
 ### 4. Run from source
 
@@ -218,7 +235,8 @@ Packages (methods 1-3) include a `version.txt`. When the ConfigTool starts it as
 
 1. Press **Detener** first if netman is running.
 2. Press the button and confirm. The ConfigTool downloads the standard ZIP, checks its SHA-256 against the one
-   GitHub reports, closes, copies the new files over the installation and opens itself again.
+   GitHub reports and its **signature** (a package without a valid signature is discarded and nothing is
+   installed), closes, copies the new files over the installation and opens itself again.
 
 Your `netman.config.json`, the saved password, `tools\` (portable Node) and `node_modules\` are not touched,
 so the portable and standard packages both update with the small download. If something fails, the log of the

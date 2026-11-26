@@ -190,6 +190,16 @@ if (-not $NoZip) {
     if (Test-Path $zipOut) { Remove-Item $zipOut -Force }
     Write-Step "Comprimiendo -> $zipOut"
     Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zipOut
+    if (Test-Path "$zipOut.sig") { Remove-Item "$zipOut.sig" -Force }
+
+    # Firma (RSA-SHA256, archivo .sig): el actualizador solo instala paquetes firmados.
+    $keyPath = Join-Path $env:USERPROFILE '.netman\signing-key.xml'
+    if (Test-Path $keyPath) {
+        & (Join-Path $root 'Sign-Package.ps1') -Zip $zipOut
+        if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) { throw 'Fallo la firma del paquete.' }
+    } else {
+        Write-Warning "No hay clave de firma ($keyPath): el paquete queda SIN firmar y las instalaciones 0.6.2+ lo rechazaran al actualizar. Crea una con .\Sign-Package.ps1 -NewKey"
+    }
     Write-Host ""
     Write-Host "Listo: $zipOut" -ForegroundColor Green
 } else {

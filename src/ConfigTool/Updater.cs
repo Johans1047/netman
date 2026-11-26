@@ -18,6 +18,7 @@ namespace NetmanConfigTool
         public string Notes;        // cuerpo del release (puede estar vacio)
         public string AssetName;    // netman-<version>-<fecha>.zip (el estandar, sin portable)
         public string AssetUrl;
+        public string SigUrl;       // <paquete>.zip.sig: firma RSA-SHA256 del ZIP (obligatoria)
         public string Sha256;       // null si GitHub no lo informa
         public long Size;
     }
@@ -33,7 +34,9 @@ namespace NetmanConfigTool
     /// (v0.5-27-gabc1234).
     ///
     /// Aplicar: se baja el ZIP estandar (no el portable: Node y node_modules
-    /// no cambian), se verifica el SHA-256 si GitHub lo informa, se extrae a
+    /// no cambian), se verifica el SHA-256 si GitHub lo informa y la FIRMA RSA
+    /// (.sig, clave publica en UpdateKey.cs; sin firma valida no se instala),
+    /// se comprueba que la version dentro del paquete sea la del tag, se extrae a
     /// una carpeta temporal y un script .cmd externo espera a que este proceso
     /// cierre, copia los archivos encima (sin borrar nada: netman.config.json,
     /// tools\ y node_modules\ quedan como estaban) y reabre el ConfigTool.
@@ -180,10 +183,46 @@ namespace NetmanConfigTool
                     if (digest != null && digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
                         info.Sha256 = digest.Substring(7).Trim().ToLowerInvariant();
 
+                    // La firma es obligatoria: un release sin .sig no se ofrece como actualizacion.
+                    info.SigUrl = FindAssetUrl(assets, name + ".sig");
+                    if (info.SigUrl == null)
+                        throw new InvalidDataException("El release " + tag + " no trae la firma (" + name + ".sig); no se instala.");
+
                     return info;
                 }
             }
             throw new InvalidDataException("El release " + tag + " no trae el paquete estandar (.zip sin \"portable\").");
+        }
+
+        private static string FindAssetUrl(System.Collections.IEnumerable assets, string name)
+        {
+            foreach (object o in assets)
+            {
+                var a = o as Dictionary<string, object>;
+                if (a != null && string.Equals(Str(a, "name"), name, StringComparison.OrdinalIgnoreCase))
+                    return Str(a, "browser_download_url");
+            }
+            return null;
+        }
+
+        /// <summary>true si sigBase64 es una firma RSA-SHA256 valida de zipPath con la clave publica embebida.</summary>
+        public static bool VerifySignature(string zipPath, string sigBase64)
+        {
+            if (string.IsNullOrEmpty(UpdateKey.PublicXml)) return false;
+            try
+            {
+                byte[] sig = Convert.FromBase64String((sigBase64 ?? string.Empty).Trim());
+                byte[] data = File.ReadAllBytes(zipPath);
+                using (var rsa = new RSACryptoServiceProvider())
+                using (var sha = SHA256.Create())
+                {
+                    rsa.PersistKeyInCsp = false;
+                    rsa.FromXmlString(UpdateKey.PublicXml);
+                    return rsa.VerifyData(data, sha, sig);
+                }
+            }
+            catch (FormatException) { return false; }
+            catch (CryptographicException) { return false; }
         }
 
         private static string Str(Dictionary<string, object> d, string key)
@@ -199,8 +238,9 @@ namespace NetmanConfigTool
         public static string Download(UpdateInfo info, Action<int> progress)
         {
             bool overridden = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ApiOverrideVar));
-            if (string.IsNullOrEmpty(info.AssetUrl)
-                || (!overridden && !info.AssetUrl.StartsWith(AllowedDownloadPrefix, StringComparison.OrdinalIgnoreCase)))
+            if (string.IsNullOrEmpty(info.AssetUrl) || string.IsNullOrEmpty(info.SigUrl)
+                || (!overridden && (!info.AssetUrl.StartsWith(AllowedDownloadPrefix, StringComparison.OrdinalIgnoreCase)
+                                    || !info.SigUrl.StartsWith(AllowedDownloadPrefix, StringComparison.OrdinalIgnoreCase))))
             {
                 throw new InvalidOperationException("La URL de descarga no es de github.com/Johans1047/netman; no se descarga.");
             }
@@ -225,10 +265,26 @@ namespace NetmanConfigTool
                         throw new InvalidDataException("El SHA-256 del paquete no coincide con el que informa GitHub. Se descarta.");
                 }
 
+                // Firma: se comprueba ANTES de extraer nada.
+                string sigText;
+                using (WebClient wc = NewClient())
+                {
+                    sigText = wc.DownloadString(info.SigUrl);
+                }
+                if (!VerifySignature(zipPath, sigText))
+                    throw new InvalidDataException("La firma del paquete NO es valida (o este ConfigTool no tiene clave). Se descarta; no se instala nada.");
+
                 ExtractSafely(zipPath, staging);
 
                 if (!File.Exists(Path.Combine(staging, "src", "ConfigTool", "bin", "Release", "NetmanConfigTool.exe")))
                     throw new InvalidDataException("El paquete no tiene la estructura esperada (falta NetmanConfigTool.exe).");
+
+                // La firma garantiza que el ZIP es el que firmaste, pero no a que release pertenece:
+                // si la version de adentro no es la del tag, alguien esta sirviendo un paquete firmado
+                // viejo como si fuera nuevo (ataque de "downgrade").
+                string inner = InstalledVersion(staging);
+                if (inner == null || !string.Equals(inner.TrimStart('v', 'V'), info.Tag.TrimStart('v', 'V'), StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("La version del paquete (" + (inner ?? "ninguna") + ") no coincide con la del release (" + info.Tag + ").");
 
                 File.Delete(zipPath);
                 return staging;

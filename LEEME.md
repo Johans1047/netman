@@ -61,8 +61,8 @@ Al abrir el ConfigTool, netman pregunta a GitHub si hay una versión nueva. Si l
 **Actualizar a vX.Y.Z** arriba a la derecha:
 
 1. Si netman está corriendo, pulsa **Detener**.
-2. Pulsa el botón y confirma. Descarga el ZIP (comprobando su SHA-256), se cierra, copia los archivos nuevos y se
-   vuelve a abrir solo.
+2. Pulsa el botón y confirma. Descarga el ZIP, comprueba su SHA-256 y su **firma** (un paquete sin firma válida se
+   descarta y no se instala nada), se cierra, copia los archivos nuevos y se vuelve a abrir solo.
 
 No se tocan `netman.config.json`, la clave guardada, `tools\` (Node portable) ni `node_modules\`. Si algo falla, el
 registro del último intento queda en `%TEMP%\netman-update.log`.
