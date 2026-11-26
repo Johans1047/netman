@@ -53,6 +53,19 @@ depuración se pueden cerrar los procesos de netman.
 | `NETMAN_BROWSER_CHANNEL` | `msedge` (defecto) o `chrome` |
 | `NETMAN_DOWNLOADS_DIR` | Carpeta de descargas del navegador de netman |
 | `NETMAN_DIALOGS` | `accept` = aceptar todos los diálogos JS (por defecto se cancelan los `confirm`/`prompt` para no aprobar un borrado sin querer) |
+| `NETMAN_NO_UPDATE_CHECK` | `1` = no buscar actualizaciones al abrir el ConfigTool (por ejemplo sin internet) |
+
+## Actualizar
+
+Al abrir el ConfigTool, netman pregunta a GitHub si hay una versión nueva. Si la hay, aparece el botón
+**Actualizar a vX.Y.Z** arriba a la derecha:
+
+1. Si netman está corriendo, pulsa **Detener**.
+2. Pulsa el botón y confirma. Descarga el ZIP (comprobando su SHA-256), se cierra, copia los archivos nuevos y se
+   vuelve a abrir solo.
+
+No se tocan `netman.config.json`, la clave guardada, `tools\` (Node portable) ni `node_modules\`. Si algo falla, el
+registro del último intento queda en `%TEMP%\netman-update.log`.
 
 ## Al terminar
 

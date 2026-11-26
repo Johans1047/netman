@@ -16,6 +16,7 @@ namespace NetmanConfigTool
         private System.Windows.Forms.Panel pnlHeader;
         private BoltLogo logo;
         private System.Windows.Forms.Label lblTitle;
+        private System.Windows.Forms.Button btnActualizar;
         private System.Windows.Forms.Label lblHint;
         private System.Windows.Forms.Label lblUser;
         private System.Windows.Forms.TextBox txtUser;
@@ -51,6 +52,7 @@ namespace NetmanConfigTool
             this.pnlHeader = new System.Windows.Forms.Panel();
             this.logo = new BoltLogo();
             this.lblTitle = new System.Windows.Forms.Label();
+            this.btnActualizar = new System.Windows.Forms.Button();
             this.lblHint = new System.Windows.Forms.Label();
             this.lblUser = new System.Windows.Forms.Label();
             this.txtUser = new System.Windows.Forms.TextBox();
@@ -98,6 +100,7 @@ namespace NetmanConfigTool
             this.pnlHeader.Paint += new System.Windows.Forms.PaintEventHandler(this.pnlHeader_Paint);
             this.pnlHeader.Controls.Add(this.logo);
             this.pnlHeader.Controls.Add(this.lblTitle);
+            this.pnlHeader.Controls.Add(this.btnActualizar);
 
             // logo
             this.logo.Location = new System.Drawing.Point(left, 10);
@@ -110,6 +113,15 @@ namespace NetmanConfigTool
             this.lblTitle.Font = new System.Drawing.Font("Segoe UI", 13F, System.Drawing.FontStyle.Bold);
             this.lblTitle.Location = new System.Drawing.Point(left + 42, 12);
             this.lblTitle.Text = "netman — configuración (v0.5)";
+
+            // btnActualizar -- solo se muestra cuando hay un release nuevo en GitHub.
+            this.btnActualizar.Visible = false;
+            // Lo mueve ApplyResponsiveLayout junto con el borde derecho del bloque central.
+            this.btnActualizar.Size = new System.Drawing.Size(230, 30);
+            this.btnActualizar.Location = new System.Drawing.Point(left * 2 + fieldWidth - left - 230, 11);
+            this.btnActualizar.Text = "Actualizar";
+            this.btnActualizar.UseVisualStyleBackColor = false;
+            this.btnActualizar.Click += new System.EventHandler(this.btnActualizar_Click);
 
             // lblHint -- pedido explicito: dejar claro que hay que correr con Ctrl+F5
             this.lblHint.AutoSize = false;

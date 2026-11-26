@@ -49,6 +49,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="CredentialManager.cs" />
+    <Compile Include="Updater.cs" />
     <Compile Include="NetmanConfig.cs" />
     <Compile Include="ConfigForm.cs">
       <SubType>Form</SubType>

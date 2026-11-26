@@ -42,7 +42,7 @@ Pick one method. Methods 1 and 2 use a ready-made ZIP from the
 
 ### 1. Portable ZIP (recommended)
 
-`netman-<version>-<date>-portable.zip` (~45 MB) includes the compiled tools, a portable Node.js and Playwright
+`netman-<version>-portable.zip` (~45 MB) includes the compiled tools, a portable Node.js and Playwright
 already installed.
 
 1. Download the `...-portable.zip` asset from the [Releases page](https://github.com/Johans1047/netman/releases).
@@ -58,7 +58,7 @@ already installed.
 
 ### 2. Standard ZIP
 
-`netman-<version>-<date>.zip` (< 1 MB) contains only netman's own files.
+`netman-<version>.zip` (< 1 MB) contains only netman's own files.
 
 1. Download the plain `.zip` asset (the one **without** `-portable`) from the
    [Releases page](https://github.com/Johans1047/netman/releases).
@@ -81,7 +81,7 @@ packages, compiles the Host and the ConfigTool in Release, and assembles everyth
 git clone https://github.com/Johans1047/netman.git
 cd netman
 
-# Standard package -> dist\netman-<version>-<date>.zip
+# Standard package -> dist\netman-<version>.zip
 .\Build-Package.ps1
 
 # Portable package (downloads the latest Node.js LTS and runs npm install) -> ...-portable.zip
@@ -92,9 +92,23 @@ cd netman
 .\Build-Package.ps1 -NoZip
 ```
 
-The script finds MSBuild through `vswhere`, then falls back to MSBuild 12.0 / 14.0. `<version>` comes from
-`git describe --tags --always --dirty`. Give the resulting ZIP to whoever needs it; they install it with
+The script finds MSBuild through `vswhere`, then falls back to MSBuild 12.0 / 14.0. `<version>` comes from the
+[`VERSION`](VERSION) file (three numbers, e.g. `0.6.0`). Give the resulting ZIP to whoever needs it; they install it with
 method 1 or 2.
+
+#### Publishing a new version
+
+Installed copies check GitHub for a newer release (see [Updating](#updating)), so a release is how an update
+reaches everyone:
+
+1. Edit [`VERSION`](VERSION) (e.g. `0.6.1`) and commit it.
+2. Build both packages: `.\Build-Package.ps1` and `.\Build-Package.ps1 -Portable`.
+3. Create the release with the tag `v` + the version, attaching both ZIPs:
+   ```powershell
+   gh release create v0.6.1 dist\netman-0.6.1.zip dist\netman-0.6.1-portable.zip --title "netman 0.6.1" --notes "What changed"
+   ```
+
+The updater uses the ZIP **without** `-portable` in its name, so keep both assets named like that.
 
 ### 4. Run from source
 
@@ -194,6 +208,21 @@ to each machine and is not committed.
 | `NETMAN_DOWNLOADS_DIR` | Download folder for netman's browser |
 | `NETMAN_DIALOGS` | `accept` accepts every JS dialog. By default `confirm`/`prompt` are cancelled so a delete is never approved by accident |
 | `NETMAN_LIBRARY_PROJECT`, `NETMAN_WEB_DIR` | Override the library project / site folder for `bin\netman-sipaf.cmd` |
+| `NETMAN_NO_UPDATE_CHECK` | `1` = do not look for updates when the ConfigTool starts (e.g. offline machines) |
+
+## Updating
+
+Packages (methods 1-3) include a `version.txt`. When the ConfigTool starts it asks GitHub for the latest
+[release](https://github.com/Johans1047/netman/releases); if it is newer than your version, an
+**Actualizar a vX.Y.Z** button appears in the header.
+
+1. Press **Detener** first if netman is running.
+2. Press the button and confirm. The ConfigTool downloads the standard ZIP, checks its SHA-256 against the one
+   GitHub reports, closes, copies the new files over the installation and opens itself again.
+
+Your `netman.config.json`, the saved password, `tools\` (portable Node) and `node_modules\` are not touched,
+so the portable and standard packages both update with the small download. If something fails, the log of the
+last attempt is in `%TEMP%\netman-update.log`. Running from source (method 4) has no `version.txt`: use `git pull`.
 
 ## Stopping and uninstalling
 

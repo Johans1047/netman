@@ -34,6 +34,12 @@ namespace NetmanConfigTool
         private Process _hostProcess;
         private Process _browserProcess;
 
+        // ---- Actualizaciones (releases de GitHub) ---------------------------
+        // null => esto es un checkout de desarrollo (no hay version.txt): no se busca nada.
+        private readonly string _installedVersion;
+        private UpdateInfo _pendingUpdate;
+        private bool _updating;
+
         /// <summary>
         /// null => hay "node" en el PATH del sistema, se usa tal cual.
         /// Si no, esta es la carpeta de una copia portable de Node (sin
@@ -140,6 +146,7 @@ namespace NetmanConfigTool
             StyleButton(btnBrowseSitePath, BtnKind.Outline);
             StyleButton(btnDetener, BtnKind.Neutral);
             StyleButton(btnCerrar, BtnKind.Neutral);
+            StyleButton(btnActualizar, BtnKind.Outline);
 
             foreach (Label l in new Label[] { lblUser, lblPass, lblLibreria, lblSitePath, lblSiteUrl, lblLogs })
             {
@@ -175,6 +182,14 @@ namespace NetmanConfigTool
             _configPath = NetmanConfig.DefaultPath(_netmanRoot);
             _hostExePath = Path.Combine(_netmanRoot, "src", "Host", "bin", "Debug", "HotReloadTool.Host.exe");
             _browserJsPath = Path.Combine(_netmanRoot, "netman-hotreload-browser.js");
+
+            _installedVersion = Updater.InstalledVersion(_netmanRoot);
+            lblTitle.Text = "netman — configuración (" + Updater.Display(_installedVersion) + ")";
+
+            // Ventana por defecto el doble de ancha (sin pasarse de la pantalla): asi cabe
+            // el boton "Actualizar a vX.Y.Z" del encabezado sin pisar el titulo.
+            Rectangle area = Screen.FromPoint(Cursor.Position).WorkingArea;
+            ClientSize = new Size(Math.Min(ClientSize.Width * 2, area.Width - 40), ClientSize.Height);
 
             Load += ConfigForm_Load;
             FormClosing += ConfigForm_FormClosing;
@@ -241,7 +256,7 @@ namespace NetmanConfigTool
 
                 // Pegados al borde derecho del bloque: se desplazan y siguen el borde.
                 foreach (Control c in new Control[] {
-                    btnBrowseLibreria, btnBrowseSitePath, btnProbarSitio, btnCerrar })
+                    btnBrowseLibreria, btnBrowseSitePath, btnProbarSitio, btnCerrar, btnActualizar })
                 {
                     c.Left += dL + dW;
                 }
@@ -308,6 +323,98 @@ namespace NetmanConfigTool
                 AppendLog("GUI", "AVISO: estás corriendo con el debugger de Visual Studio adjunto (F5). "
                     + "Si parás la depuración mientras el Host o el navegador siguen corriendo, VS puede "
                     + "matarlos junto con este proceso. Usá Ctrl+F5 la próxima vez.");
+            }
+
+            CheckForUpdateAsync();
+        }
+
+        // Pregunta a GitHub por el ultimo release sin bloquear la ventana. Si no hay
+        // red o falla, solo deja una linea en el log: nunca molesta con un cuadro de dialogo.
+        private async void CheckForUpdateAsync()
+        {
+            if (_installedVersion == null || Updater.IsDisabled())
+            {
+                return;
+            }
+
+            try
+            {
+                UpdateInfo info = await Task.Run(() => Updater.CheckForUpdate(_installedVersion));
+                if (IsDisposed)
+                {
+                    return;
+                }
+
+                if (info == null)
+                {
+                    AppendLog("GUI", "netman " + Updater.Display(_installedVersion) + ": estás al día.");
+                    return;
+                }
+
+                _pendingUpdate = info;
+                btnActualizar.Text = "Actualizar a " + Updater.Display(info.Tag);
+                btnActualizar.Visible = true;
+                AppendLog("GUI", "Hay una versión nueva de netman: " + Updater.Display(info.Tag) + " (instalada: " + Updater.Display(_installedVersion)
+                    + "). Botón \"Actualizar\" arriba a la derecha.");
+            }
+            catch (Exception ex)
+            {
+                AppendLog("GUI", "No pude buscar actualizaciones: " + ex.GetBaseException().Message);
+            }
+        }
+
+        private async void btnActualizar_Click(object sender, EventArgs e)
+        {
+            UpdateInfo info = _pendingUpdate;
+            if (info == null || _updating)
+            {
+                return;
+            }
+
+            if (_hostProcess != null || _browserProcess != null)
+            {
+                MessageBox.Show(this, "netman está corriendo. Pulsa Detener antes de actualizar.",
+                    "Actualizar netman", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            DialogResult answer = MessageBox.Show(this,
+                "Se va a instalar " + Updater.Display(info.Tag) + " en:\n" + _netmanRoot + "\n\n"
+                + "Tu configuración (netman.config.json), la clave guardada y Node/Playwright no se tocan. "
+                + "netman se cierra y se vuelve a abrir solo.\n\n¿Continuar?",
+                "Actualizar netman", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (answer != DialogResult.Yes)
+            {
+                return;
+            }
+
+            _updating = true;
+            btnActualizar.Enabled = false;
+            btnIniciar.Enabled = false;
+            SetStatus("Descargando " + Updater.Display(info.Tag) + " ...", false);
+            AppendLog("GUI", "Descargando " + info.AssetName + " ...");
+
+            try
+            {
+                string staging = await Task.Run(() => Updater.Download(info, pct =>
+                {
+                    try { BeginInvoke(new Action(() => SetStatus("Descargando " + Updater.Display(info.Tag) + " ... " + pct + "%", false))); }
+                    catch { }
+                }));
+
+                AppendLog("GUI", "Paquete verificado. Cerrando para aplicar la actualización...");
+                Updater.LaunchApply(staging, _netmanRoot, Application.ExecutablePath, info);
+                _closingAfterStop = true;
+                Close();
+            }
+            catch (Exception ex)
+            {
+                string msg = ex.GetBaseException().Message;
+                AppendLog("GUI", "ERROR actualizando: " + msg);
+                SetStatus("No se pudo actualizar: " + msg, true);
+                _updating = false;
+                btnActualizar.Enabled = true;
+                btnIniciar.Enabled = _hostProcess == null && _browserProcess == null;
             }
         }
 

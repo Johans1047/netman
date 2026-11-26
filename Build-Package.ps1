@@ -59,13 +59,13 @@ $msbuild = Find-MSBuild
 Write-Step "MSBuild: $msbuild"
 
 # --- Version -----------------------------------------------------------------
-$version = 'dev'
-try {
-    $v = (& git -C $root describe --tags --always --dirty 2>$null)
-    if ($LASTEXITCODE -eq 0 -and $v) { $version = $v.Trim() }
-} catch { }
-$stamp = Get-Date -Format 'yyyyMMdd'
-$name = if ($Portable) { "netman-$version-$stamp-portable" } else { "netman-$version-$stamp" }
+# La version sale del archivo VERSION (X.Y.Z, p. ej. 0.6.0); se sube a mano al publicar.
+# El tag del release en GitHub es "v" + esa version (v0.6.0).
+$versionFile = Join-Path $root 'VERSION'
+if (-not (Test-Path $versionFile)) { throw "Falta el archivo VERSION en $root (una linea: X.Y.Z)." }
+$version = (Get-Content $versionFile -TotalCount 1).Trim()
+if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "VERSION debe ser X.Y.Z (tres numeros), y es '$version'." }
+$name = if ($Portable) { "netman-$version-portable" } else { "netman-$version" }
 $dist = Join-Path $root 'dist'
 $stage = Join-Path $dist $name
 Write-Step "Paquete: $name"
@@ -122,6 +122,9 @@ foreach ($f in $rootFiles) {
     $src = Join-Path $root $f
     if (Test-Path $src) { Copy-Item $src $stage } else { Write-Warning "Falta $f (se omite)." }
 }
+# Version instalada: la lee el ConfigTool para saber si hay un release mas nuevo en GitHub.
+# Sin version.txt (checkout de desarrollo) no busca actualizaciones.
+[System.IO.File]::WriteAllText((Join-Path $stage 'version.txt'), $version, (New-Object System.Text.UTF8Encoding($false)))
 foreach ($d in @('docs', 'site-files')) { Copy-Item (Join-Path $root $d) (Join-Path $stage $d) -Recurse }
 New-Item -ItemType Directory -Path (Join-Path $stage 'bin') | Out-Null
 Copy-Item (Join-Path $root 'bin\netman-sipaf.cmd') (Join-Path $stage 'bin')
