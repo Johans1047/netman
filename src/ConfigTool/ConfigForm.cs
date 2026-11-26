@@ -378,8 +378,16 @@ namespace NetmanConfigTool
                 return;
             }
 
+            // Las notas del release (lo que cambió), recortadas para que el cuadro no se desborde.
+            string notes = (info.Notes ?? string.Empty).Trim();
+            if (notes.Length > 500)
+            {
+                notes = notes.Substring(0, 500) + "...";
+            }
+
             DialogResult answer = MessageBox.Show(this,
                 "Se va a instalar " + Updater.Display(info.Tag) + " en:\n" + _netmanRoot + "\n\n"
+                + (notes.Length > 0 ? "Novedades:\n" + notes + "\n\n" : string.Empty)
                 + "Tu configuración (netman.config.json), la clave guardada y Node/Playwright no se tocan. "
                 + "netman se cierra y se vuelve a abrir solo.\n\n¿Continuar?",
                 "Actualizar netman", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
