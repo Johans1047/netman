@@ -21,6 +21,24 @@
 4. Completa usuario SIPAF, clave (se guarda en el Administrador de credenciales de Windows, no en un archivo), ruta del proyecto de la librería, ruta del sitio y URL (por defecto `http://localhost:12345/SIPAF/`).
 5. Con el sitio corriendo en IIS Express, dale a **Guardar e iniciar netman**.
 
+### Levantar el sitio (IIS Express)
+
+netman no levanta el sitio: tiene que estar corriendo antes. Hay dos formas y son **equivalentes**, porque las dos
+arrancan el mismo IIS Express con el mismo sitio (el binding `SIPAF-Site`, `http://localhost:12345/SIPAF`):
+
+| Forma | Cómo |
+|---|---|
+| Visual Studio | Abre el proyecto del sitio SIPAF y ejecútalo (**Ctrl+F5**). Visual Studio levanta IIS Express por ti. |
+| Línea de comandos | `& 'C:\Program Files\IIS Express\iisexpress.exe' /site:SIPAF-Site` |
+
+La línea de comandos es solo una manera de levantar el sitio sin abrir Visual Studio: el resultado es el mismo que
+ejecutarlo desde Visual Studio. Deja esa consola abierta mientras trabajas (Ctrl+C apaga el servidor). El binding
+`SIPAF-Site` debe existir en `%USERPROFILE%\Documents\IISExpress\config\applicationhost.config`, que es donde
+Visual Studio también lo guarda.
+
+Si lo levantas desde Visual Studio, usa **Ctrl+F5** ("Iniciar sin depurar") y no F5: al detener una sesión de
+depuración se pueden cerrar los procesos de netman.
+
 ## Requisitos
 
 - Windows 10/11 (.NET Framework 4.5.1+ ya viene incluido).

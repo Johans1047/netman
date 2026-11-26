@@ -22,7 +22,7 @@ to configure and start/stop everything).
 |---|---|
 | Windows 10 / 11 | .NET Framework 4.5.1+ is already included |
 | Microsoft Edge | Used by netman's browser. For Chrome, set `NETMAN_BROWSER_CHANNEL=chrome` |
-| SIPAF running in IIS Express | Start the site **first**; netman does not start it for you |
+| SIPAF running in IIS Express | Start the site **first**, from Visual Studio or with the `iisexpress.exe` command line (equivalent, see [First run](#first-run)); netman does not start it for you |
 | Node.js | Optional. The portable package bundles it; otherwise the ConfigTool downloads a portable copy on first start |
 | Visual Studio / MSBuild | Only for methods 3 and 4 (building from source) |
 
@@ -127,7 +127,7 @@ For working on netman itself. The tools are compiled in place and run from the r
 
 #### Command-line alternatives to the GUI
 
-Start the site in IIS Express first, then use either:
+Start the site in IIS Express first (Visual Studio or the `iisexpress.exe` command, see [First run](#first-run)), then use either:
 
 ```powershell
 # One window: prompts for credentials, starts the Host (own window) and the browser script
@@ -155,8 +155,19 @@ packages\xunit.runner.console.2.3.1\tools\net452\xunit.console.exe tests\Common.
 
 ## First run
 
-1. Start the SIPAF site in IIS Express (from Visual Studio with **F5** on the site project, or
-   `& 'C:\Program Files\IIS Express\iisexpress.exe' /site:SIPAF-Site`).
+1. **Start the SIPAF site first.** netman needs the site already being served by IIS Express; it does not start
+   it for you. There are two ways, and they are **equivalent**: both launch the same IIS Express server for the
+   same site (the `SIPAF-Site` binding, `http://localhost:12345/SIPAF`).
+
+   | Way | How |
+   |---|---|
+   | Visual Studio | Open the SIPAF site project and run it (**Ctrl+F5**). Visual Studio starts IIS Express for you. |
+   | Command line | `& 'C:\Program Files\IIS Express\iisexpress.exe' /site:SIPAF-Site` |
+
+   The command line is simply a way to start the site without opening Visual Studio: the result is the same as
+   running the site from Visual Studio. Keep that console open while you work (Ctrl+C stops the server). The
+   `SIPAF-Site` binding must exist in
+   `%USERPROFILE%\Documents\IISExpress\config\applicationhost.config`, which is where Visual Studio keeps it too.
 2. Open the ConfigTool and fill in:
 
    | Field | Example |
@@ -168,8 +179,8 @@ packages\xunit.runner.console.2.3.1\tools\net452\xunit.console.exe tests\Common.
    | Base URL | `http://localhost:12345/SIPAF/` (default) |
 
 3. Press **Probar sitio** to check that IIS Express answers, then **Guardar e iniciar netman**.
-4. Run SIPAF with **Ctrl+F5** ("Start without debugging"), not F5: stopping a Visual Studio debug session can kill
-   netman's processes.
+4. If you start the site from Visual Studio, use **Ctrl+F5** ("Start without debugging"), not F5: stopping a debug
+   session can kill netman's processes. Starting it from the command line avoids the issue.
 
 Settings (everything except the password) are saved to `netman.config.json` next to the tool. That file is local
 to each machine and is not committed.
