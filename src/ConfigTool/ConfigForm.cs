@@ -878,6 +878,9 @@ namespace NetmanConfigTool
             await StopAllAsync();
             SetRunningState(false);
             SetStatus("netman detenido.", false);
+            // El log tambien tiene que decirlo: si la ultima linea es "Deteniendo netman...",
+            // parece que sigue esperando aunque ya termino.
+            AppendLog("GUI", "netman detenido.");
         }
 
         /// <summary>
