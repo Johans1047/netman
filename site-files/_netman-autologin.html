@@ -125,7 +125,12 @@
       var lbl = d2.querySelector('[id$="lblmsg"]');
       msg = lbl ? (lbl.textContent || '').trim() : '';
     } catch (e) {}
-    throw new Error('Login rechazado' + (msg ? ': ' + msg : ' (la respuesta no fue wPerfiles.aspx).'));
+    // Que credenciales llegaron realmente a SIPAF (sirve para detectar un usuario vacio, con
+    // espacios o una clave vieja del Administrador de credenciales). La clave NUNCA se muestra:
+    // solo su largo, porque este mensaje termina en logs y en pantalla.
+    var recibido = ' | Usuario recibido: "' + user + '" | Contrasena recibida: ' +
+      new Array(Math.min(pass.length, 12) + 1).join('*') + ' (' + pass.length + ' caracteres)';
+    throw new Error('Login rechazado' + (msg ? ': ' + msg : ' (la respuesta no fue wPerfiles.aspx).') + recibido);
   }
 
   async function run(user, pass, dest, remember) {
